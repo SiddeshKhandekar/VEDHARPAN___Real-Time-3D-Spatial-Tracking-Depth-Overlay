@@ -1,4 +1,4 @@
-# VEDHARPAN-Real-Time-3D-Spatial-Tracking-Depth-Overlay.
+# VEDHARPAN: Real-Time Anamorphic Parallax and Ray-Traced 3D Shadow Engine
 
 > **Current Status:** 🚧 *Active Development — Scaffolding the multi-threaded vision and rendering pipelines.*
 
