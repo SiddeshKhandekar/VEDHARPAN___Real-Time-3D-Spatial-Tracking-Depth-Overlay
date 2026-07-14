@@ -7,6 +7,9 @@ Most spatial computing and augmented reality experiences require expensive heads
 
 VEDHARPAN is an exploration into real-time computer vision, mathematical coordinate mapping, and UI rendering. The goal is to detect a user's physical proximity and hand movements in 3D space $(x, y, z)$ and cast a dynamic, interactive "shadow" directly onto the desktop monitor that scales, blurs, and shifts in real time as you move closer or further from the screen.
 
+## Why this Name?
+Vedharpan combines Vedha (precision) and Darpan (mirror). True to its name, this advanced application acts as a 'Mirror of Precision' using camera tracking to capture real-world objects and shapes, instantly reflecting their exact forms and shadows into the digital model with flawless accuracy.
+
 ---
 
 ## 🧠 System Architecture & Engineering Goals
