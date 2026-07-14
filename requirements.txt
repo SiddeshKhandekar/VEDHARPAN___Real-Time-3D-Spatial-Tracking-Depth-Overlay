@@ -1,0 +1,24 @@
+# ==============================================================================
+# VEDHARPAN — Real-Time Anamorphic Parallax & Ray-Traced 3D Shadow Engine
+# Phase 1 Dependencies: AI Vision Backend & WebSocket Telemetry Broker
+# ==============================================================================
+
+# --- Core Computer Vision & Tracking ---
+# OpenCV with CUDA support is recommended. If you have an NVIDIA GPU, install
+# via: pip install opencv-contrib-python (or build from source with CUDA flags)
+opencv-contrib-python>=4.9.0.80
+
+# Google MediaPipe — provides Face Mesh (468 landmarks) and Hands (21 landmarks)
+# The 'gpu' extras flag is available on supported platforms; falls back to CPU.
+mediapipe>=0.10.11
+
+# --- Numerical Computing ---
+numpy>=1.26.4
+
+# --- Async WebSocket Server ---
+# websockets is the industry-standard, asyncio-native WebSocket library.
+websockets>=12.0
+
+# --- Utilities ---
+# Used for structured logging and potential future config loading.
+python-dotenv>=1.0.1
