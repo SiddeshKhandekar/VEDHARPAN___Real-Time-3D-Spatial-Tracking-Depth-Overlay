@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VEDHARPAN 3D Viewport</title>
+    <link rel="stylesheet" href="style.css">
+    
+    <!-- ES Module Import Map for Three.js and loaders -->
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.165.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.165.0/examples/jsm/"
+            }
+        }
+    </script>
+</head>
+<body>
+    <!-- Main WebGL rendering canvas -->
+    <canvas id="viewport"></canvas>
+
+    <!-- Overlay HUD for server status and diagnostics -->
+    <div id="hud">
+        <div class="hud-item">Status: <span id="status" class="disconnected">Disconnected</span></div>
+        <div class="hud-item">FPS: <span id="fps">0</span></div>
+        <div class="hud-item">Head: <span id="head-coords">x: 0.00, y: 0.00, z: 0.00</span></div>
+        <div class="hud-item">Hand: <span id="hand-coords">x: 0.00, y: 0.00, z: 0.00</span></div>
+    </div>
+
+    <!-- Main Scene script -->
+    <script type="module" src="scene.js"></script>
+</body>
+</html>
