@@ -22,3 +22,8 @@ websockets>=12.0
 # --- Utilities ---
 # Used for structured logging and potential future config loading.
 python-dotenv>=1.0.1
+
+# --- Native GUI Desktop Overlay Wrapper ---
+PyQt6>=6.6.0
+PyQt6-WebEngine>=6.6.0
+

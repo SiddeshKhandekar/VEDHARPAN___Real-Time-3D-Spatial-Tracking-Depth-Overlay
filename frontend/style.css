@@ -1,0 +1,64 @@
+/* Basic Reset */
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+body, html {
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    background-color: transparent;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    color: #ffffff;
+}
+
+/* Fullscreen WebGL Canvas */
+#viewport {
+    display: block;
+    width: 100vw;
+    height: 100vh;
+    background-color: transparent;
+}
+
+/* Overlay HUD Styling */
+#hud {
+    position: absolute;
+    top: 20px;
+    left: 20px;
+    background: rgba(0, 0, 0, 0.7);
+    padding: 15px;
+    border-radius: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    pointer-events: none; /* Let mouse clicks pass through HUD */
+    user-select: none;
+    z-index: 10;
+    font-size: 13px;
+    letter-spacing: 0.5px;
+    backdrop-filter: blur(10px);
+}
+
+.hud-item {
+    margin-bottom: 8px;
+}
+
+.hud-item:last-child {
+    margin-bottom: 0;
+}
+
+/* Connection States */
+#status.connected {
+    color: #4cd964;
+    font-weight: bold;
+}
+
+#status.disconnected {
+    color: #ff3b30;
+    font-weight: bold;
+}
+
+#status.connecting {
+    color: #ffcc00;
+    font-weight: bold;
+}
