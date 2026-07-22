@@ -38,8 +38,10 @@ import logging
 import queue
 import signal
 import sys
+import threading
 import time
 from typing import Set
+
 
 import websockets
 from websockets.asyncio.server import ServerConnection
@@ -347,10 +349,11 @@ class TelemetryBroker:
 # ---------------------------------------------------------------------------
 
 class Application:
-    """Top-level lifecycle controller for the VEDHARPAN Phase 1 backend.
+    """Top-level lifecycle controller for the VEDHARPAN system.
 
-    Wires together the VisionPipeline and TelemetryBroker, registers OS
-    signal handlers, and drives the asyncio event loop.
+    Wires together the VisionPipeline, TelemetryBroker, and TransparentOverlay.
+    Runs the PyQt6 GUI event loop on the main thread while delegating vision
+    inference and WebSocket telemetry broadcasting to background threads.
 
     Usage:
         app = Application()
@@ -370,72 +373,84 @@ class Application:
             host            = WEBSOCKET_HOST,
             port            = WEBSOCKET_PORT,
         )
+        self._async_loop: Optional[asyncio.AbstractEventLoop] = None
+        self._async_thread: Optional[threading.Thread] = None
 
     def run(self) -> None:
-        """Start all subsystems and block until a shutdown signal is received.
+        """Start all subsystems and block until the GUI window is closed.
 
         Execution order:
             1. Start the vision pipeline background thread.
-            2. Register OS signal handlers.
-            3. Run the asyncio event loop until the broker's shutdown event fires.
-            4. Execute the teardown sequence.
+            2. Run the asyncio event loop / WebSocket broker in a daemon thread.
+            3. Initialize and execute the PyQt6 GUI on the main thread.
+            4. Execute the teardown sequence on exit.
         """
         logger.info("=" * 60)
-        logger.info("VEDHARPAN — ShadowSync 2.0 Phase 1 Backend Starting")
+        logger.info("VEDHARPAN — ShadowSync 2.0 Starting")
         logger.info("=" * 60)
 
+        # 1. Start the vision pipeline background thread
         self._vision_pipeline.start()
 
-        # Obtain the running event loop and attach signal handlers.
-        # Note: signal handlers must be registered on the event loop thread.
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
+        # 2. Run the WebSocket broker in a separate background thread
+        self._async_loop = asyncio.new_event_loop()
+        self._async_thread = threading.Thread(
+            target = self._run_async_loop,
+            name   = "WebSocketBrokerThread",
+            daemon = True
+        )
+        self._async_thread.start()
 
-        self._register_signal_handlers(loop)
+        # 3. Start the PyQt6 GUI on the main thread
+        from gui_overlay import TransparentOverlay
+        from PyQt6.QtWidgets import QApplication
+
+        # Force hardware WebGL and shared context initialization
+        os.environ["QT_FORCE_STDERR_LOGGING"] = "1"
+        
+        self._qt_app = QApplication(sys.argv)
+        self._overlay_window = TransparentOverlay("frontend/index.html")
+        self._overlay_window.show()
 
         try:
-            loop.run_until_complete(self._broker.run())
+            self._qt_app.exec()
         except KeyboardInterrupt:
             logger.info("Application: KeyboardInterrupt received.")
         finally:
             self._teardown()
-            loop.close()
 
-    def _register_signal_handlers(self, loop: asyncio.AbstractEventLoop) -> None:
-        """Attach SIGINT and SIGTERM handlers to the asyncio event loop.
-
-        On UNIX systems the loop supports add_signal_handler directly.
-        On Windows, signal handling via the event loop is limited, so we
-        additionally rely on the try/except KeyboardInterrupt in run().
-
-        Args:
-            loop: The running asyncio event loop to attach handlers to.
-        """
-        def _handle_signal(sig_name: str) -> None:
-            logger.info("Application: OS signal %s received — initiating shutdown.", sig_name)
-            self._broker.shutdown()
-
-        # Windows does not support SIGTERM via asyncio; guard accordingly.
+    def _run_async_loop(self) -> None:
+        """Entry point for the background async thread."""
+        if self._async_loop is None:
+            return
+        asyncio.set_event_loop(self._async_loop)
         try:
-            loop.add_signal_handler(signal.SIGINT,  lambda: _handle_signal("SIGINT"))
-            loop.add_signal_handler(signal.SIGTERM, lambda: _handle_signal("SIGTERM"))
-            logger.info("Application: SIGINT and SIGTERM handlers registered.")
-        except NotImplementedError:
-            # Windows: asyncio signal handlers are not supported in all contexts.
-            logger.warning(
-                "Application: asyncio signal handlers are not available on this platform. "
-                "Use Ctrl+C to terminate the process."
-            )
+            self._async_loop.run_until_complete(self._broker.run())
+        except asyncio.CancelledError:
+            pass
+        finally:
+            self._async_loop.close()
 
     def _teardown(self) -> None:
         """Execute the ordered shutdown sequence for all subsystems.
 
         Order is critical:
-            1. Stop the vision pipeline first (releases the camera).
-            2. The broker has already shut down by the time run() returns.
+            1. Stop the WebSocket broker server.
+            2. Stop the vision pipeline (releases camera).
+            3. Join background threads.
         """
         logger.info("Application: Executing teardown sequence.")
+        
+        # Stop broker
+        self._broker.shutdown()
+        
+        # Stop vision pipeline
         self._vision_pipeline.stop()
+        
+        # Join async thread
+        if self._async_thread and self._async_thread.is_alive():
+            self._async_thread.join(timeout=3.0)
+            
         logger.info("Application: All subsystems stopped. Goodbye.")
 
 
@@ -447,3 +462,4 @@ if __name__ == "__main__":
     configure_logging()
     app = Application()
     app.run()
+
