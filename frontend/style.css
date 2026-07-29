@@ -31,7 +31,7 @@ body, html {
     padding: 15px;
     border-radius: 8px;
     border: 1px solid rgba(255, 255, 255, 0.1);
-    pointer-events: none; /* Let mouse clicks pass through HUD */
+    pointer-events: auto; /* Allow clicking on HUD elements */
     user-select: none;
     z-index: 10;
     font-size: 13px;
@@ -41,6 +41,23 @@ body, html {
 
 .hud-item {
     margin-bottom: 8px;
+}
+
+.disconnect-btn {
+    margin-top: 15px;
+    background-color: #ff3b30;
+    color: white;
+    border: none;
+    padding: 6px 12px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: bold;
+    width: 100%;
+}
+
+.disconnect-btn:hover {
+    background-color: #d32f2f;
 }
 
 .hud-item:last-child {

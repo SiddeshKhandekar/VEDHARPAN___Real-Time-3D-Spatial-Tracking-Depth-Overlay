@@ -35,12 +35,14 @@ Test with the bundled verify_stream.py script:
 import asyncio
 import json
 import logging
+import os
 import queue
 import signal
 import sys
 import threading
 import time
 from typing import Set
+
 
 
 import websockets
@@ -226,10 +228,15 @@ class TelemetryBroker:
         self._connected_clients.add(websocket)
 
         try:
-            # Keep the connection open until the client disconnects.
-            # We don't expect inbound messages in this protocol, but
-            # awaiting here prevents the handler from returning immediately.
-            await websocket.wait_closed()
+            async for message in websocket:
+                try:
+                    data = json.loads(message)
+                    if data.get("command") == "shutdown":
+                        logger.info("TelemetryBroker: Shutdown command received from client.")
+                        import os, signal
+                        os.kill(os.getpid(), signal.SIGINT)
+                except json.JSONDecodeError:
+                    pass
         finally:
             self._connected_clients.discard(websocket)
             logger.info("TelemetryBroker: Client disconnected — %s.", client_address)
@@ -304,6 +311,7 @@ class TelemetryBroker:
                 "y": round(frame.hand.y, 6),
                 "z": round(frame.hand.z, 6),
             },
+            "hand_landmarks": frame.hand_landmarks,
             "timestamp": round(frame.timestamp, 6),
         }
         return json.dumps(payload, separators=(",", ":"))

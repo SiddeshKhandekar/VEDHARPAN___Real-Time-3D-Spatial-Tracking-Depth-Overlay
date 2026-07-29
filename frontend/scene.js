@@ -52,8 +52,10 @@ class DioramaScene {
         // Telemetry state
         this.latestHead = { x: 0, y: 0, z: 0 };
         this.latestHand = { x: 0, y: 0, z: 0 };
+        this.latestHandLandmarks = [];
         this.socket = null;
         this.reconnectAttempt = 0;
+        this.handRigSpheres = [];
 
         // Performance metrics
         this.frameCount = 0;
@@ -69,7 +71,7 @@ class DioramaScene {
     init() {
         // 1. Create Scene
         this.scene = new THREE.Scene();
-        this.scene.fog = new THREE.FogExp2(0x1a1a24, 0.015);
+        this.scene.fog = new THREE.FogExp2(0x1a1a24, 0.008);
 
         // 2. Setup Renderer
         this.renderer = new THREE.WebGLRenderer({
@@ -82,14 +84,13 @@ class DioramaScene {
         this.renderer.shadowMap.enabled = true;
         this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
         this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-        this.renderer.toneMappingExposure = 1.0;
+        this.renderer.toneMappingExposure = 1.2;
 
-        // 3. Setup Camera
+        // 3. Setup Camera — straight eye-level looking into the hall
         const aspect = window.innerWidth / window.innerHeight;
-        this.camera = new THREE.PerspectiveCamera(45, aspect, 0.1, 100);
-        // Default camera resting position looking directly at centerpiece
-        this.camera.position.set(0, 1.8, 8);
-        this.camera.lookAt(0, 1.0, 0);
+        this.camera = new THREE.PerspectiveCamera(50, aspect, 0.1, 100);
+        this.camera.position.set(0, 1.5, 6);
+        this.camera.lookAt(0, 1.5, 0);
 
         // 4. Setup Lighting
         this.setupLights();
@@ -102,6 +103,15 @@ class DioramaScene {
 
         // 7. Event Listeners
         window.addEventListener('resize', () => this.onWindowResize());
+        
+        const disconnectBtn = document.getElementById('disconnect-btn');
+        if (disconnectBtn) {
+            disconnectBtn.addEventListener('click', () => {
+                if (this.socket && this.socket.readyState === WebSocket.OPEN) {
+                    this.socket.send(JSON.stringify({command: "shutdown"}));
+                }
+            });
+        }
 
         // 8. Connect to WebSocket Telemetry Server
         this.connectTelemetry();
@@ -115,49 +125,79 @@ class DioramaScene {
      */
     setupLights() {
         // Soft ambient fill light
-        const ambientLight = new THREE.AmbientLight(0xffffff, 0.4);
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
         this.scene.add(ambientLight);
 
-        // Subtle bottom blue bounce light
-        const hemisphereLight = new THREE.HemisphereLight(0x7ec0ff, 0x111122, 0.3);
+        // Subtle sky-ground bounce light
+        const hemisphereLight = new THREE.HemisphereLight(0x7ec0ff, 0x111122, 0.35);
         this.scene.add(hemisphereLight);
 
-        // Primary Shadow-casting Directional Light (angled from top-front-right)
-        this.dirLight = new THREE.DirectionalLight(0xffffff, 3.5);
-        this.dirLight.position.set(5, 8, 4);
+        // Primary Shadow-casting Directional Light — positioned above and in front
+        // so shadows project onto the floor and walls visibly.
+        this.dirLight = new THREE.DirectionalLight(0xfff5e6, 4.0);
+        this.dirLight.position.set(3, 10, 6);
+        this.dirLight.target.position.set(0, 0, 0);
         this.dirLight.castShadow = true;
 
-        // Optimize Shadow Map Frustum for high detail over diorama
-        this.dirLight.shadow.mapSize.width = 2048;
-        this.dirLight.shadow.mapSize.height = 2048;
+        // Shadow frustum sized to cover the whole room interior
+        this.dirLight.shadow.mapSize.width = 4096;
+        this.dirLight.shadow.mapSize.height = 4096;
         this.dirLight.shadow.camera.near = 0.5;
-        this.dirLight.shadow.camera.far = 25;
-        this.dirLight.shadow.camera.left = -6;
-        this.dirLight.shadow.camera.right = 6;
-        this.dirLight.shadow.camera.top = 6;
-        this.dirLight.shadow.camera.bottom = -6;
-        this.dirLight.shadow.bias = -0.0005;
-        this.dirLight.shadow.radius = 4; // Blurs shadow edges slightly
+        this.dirLight.shadow.camera.far = 30;
+        this.dirLight.shadow.camera.left = -10;
+        this.dirLight.shadow.camera.right = 10;
+        this.dirLight.shadow.camera.top = 10;
+        this.dirLight.shadow.camera.bottom = -10;
+        this.dirLight.shadow.bias = -0.0003;
+        this.dirLight.shadow.normalBias = 0.02;
+        this.dirLight.shadow.radius = 3;
 
         this.scene.add(this.dirLight);
+        this.scene.add(this.dirLight.target);
     }
 
     /**
-     * Create an invisible mesh proxy for the hand.
-     * This casts a dynamic shadow representing the user's hand movements.
+     * Create a 21-joint skeleton rig for the hand that casts real shadows.
+     *
+     * CRITICAL: MeshBasicMaterial with visible:false does NOT cast shadows
+     * in Three.js. We must use MeshStandardMaterial with opacity:0 and
+     * transparent:true. The mesh is optically invisible to the viewer but
+     * the renderer still writes it into the shadow depth pass.
      */
     createHandOccluder() {
-        // A low-poly sphere proxy acting as the hand center of mass
-        const geometry = new THREE.SphereGeometry(0.45, 16, 16);
-        const material = new THREE.MeshBasicMaterial({
-            color: 0xff0000,
-            visible: false // Invisible to the user, still casts shadow
+        this.handRigGroup = new THREE.Group();
+        this.handRigSpheres = [];
+
+        // Shadow-only material: optically invisible, but rendered into shadow maps
+        const shadowOnlyMat = new THREE.MeshStandardMaterial({
+            color: 0x000000,
+            transparent: true,
+            opacity: 0.0,
+            roughness: 1.0,
+            metalness: 0.0,
         });
 
-        this.handOccluder = new THREE.Mesh(geometry, material);
+        const jointGeo = new THREE.SphereGeometry(0.15, 10, 10);
+
+        // 21 MediaPipe hand landmarks
+        for (let i = 0; i < 21; i++) {
+            const sphere = new THREE.Mesh(jointGeo, shadowOnlyMat);
+            sphere.castShadow = true;
+            sphere.receiveShadow = false;
+            sphere.position.set(0, -10, 0); // Start out-of-frame
+            this.handRigGroup.add(sphere);
+            this.handRigSpheres.push(sphere);
+        }
+
+        // Central palm volume proxy (slightly larger)
+        const palmGeo = new THREE.SphereGeometry(0.28, 12, 12);
+        this.handOccluder = new THREE.Mesh(palmGeo, shadowOnlyMat);
         this.handOccluder.castShadow = true;
-        this.handOccluder.position.set(0, 1.2, 2.0); // Default home position
-        this.scene.add(this.handOccluder);
+        this.handOccluder.receiveShadow = false;
+        this.handOccluder.position.set(0, -10, 2.0);
+        this.handRigGroup.add(this.handOccluder);
+
+        this.scene.add(this.handRigGroup);
     }
 
     /**
@@ -183,30 +223,31 @@ class DioramaScene {
             });
         };
 
-        // 1. Load Room Environment
+        // 1. Load Room Environment — position and rotate so the hall faces the camera head-on
         loader.load(
             `${assetPath}urban_design_vr_room.glb`,
             (gltf) => {
                 this.roomModel = gltf.scene;
+                // Centre room at origin; rotate 180° on Y so we look into the hall
                 this.roomModel.position.set(0, 0, 0);
-                this.roomModel.scale.set(1.0, 1.0, 1.0);
-                configureShadows(this.roomModel, false, true); // Room receives shadows
+                this.roomModel.rotation.set(0, Math.PI, 0);
+                this.roomModel.scale.set(1.2, 1.2, 1.2);
+                configureShadows(this.roomModel, false, true); // Room only receives shadows
                 this.scene.add(this.roomModel);
-                console.log('Loaded: Room Environment');
+                console.log('Loaded: Room Environment (rotated to face camera)');
             },
             undefined,
             (error) => console.error('Error loading Room Model:', error)
         );
 
-        // 2. Load Centered Mecha Model
+        // 2. Load Mecha — centered on the floor of the room
         loader.load(
             `${assetPath}mecha.glb`,
             (gltf) => {
                 this.mechaModel = gltf.scene;
-                // Position mecha center-stage on the floor of the room
-                this.mechaModel.position.set(0, 0.1, 0);
-                this.mechaModel.scale.set(0.65, 0.65, 0.65);
-                configureShadows(this.mechaModel, true, true); // Mecha casts & receives shadows
+                this.mechaModel.position.set(0, 0, 0);
+                this.mechaModel.scale.set(0.6, 0.6, 0.6);
+                configureShadows(this.mechaModel, true, true);
                 this.scene.add(this.mechaModel);
                 console.log('Loaded: Centerpiece Mecha');
             },
@@ -214,17 +255,28 @@ class DioramaScene {
             (error) => console.error('Error loading Mecha Model:', error)
         );
 
-        // 3. Load Car Tires Scatter Model
+        // 3. Load Tires — scattered around the mecha on the floor
         loader.load(
             `${assetPath}game_ready_free_car_tires.glb`,
             (gltf) => {
-                this.tiresModel = gltf.scene;
-                // Scatter tires offset to the side of the centerpiece mecha
-                this.tiresModel.position.set(-1.8, 0, 0.8);
-                this.tiresModel.scale.set(0.5, 0.5, 0.5);
-                configureShadows(this.tiresModel, true, true); // Tires cast & receive shadows
-                this.scene.add(this.tiresModel);
-                console.log('Loaded: Tires Scatter Model');
+                // Clone and scatter multiple tire groups around mecha
+                const tirePositions = [
+                    { x: -1.5, z:  1.2, rotY: 0.3 },
+                    { x:  1.8, z:  0.5, rotY: -0.5 },
+                    { x: -0.8, z: -1.5, rotY: 1.2 },
+                    { x:  1.2, z: -1.0, rotY: 2.0 },
+                ];
+
+                tirePositions.forEach((pos, idx) => {
+                    const tireClone = gltf.scene.clone();
+                    tireClone.position.set(pos.x, 0, pos.z);
+                    tireClone.rotation.y = pos.rotY;
+                    tireClone.scale.set(0.4, 0.4, 0.4);
+                    configureShadows(tireClone, true, true);
+                    this.scene.add(tireClone);
+                });
+
+                console.log('Loaded: Tires scattered around Mecha');
             },
             undefined,
             (error) => console.error('Error loading Tires Model:', error)
@@ -259,6 +311,10 @@ class DioramaScene {
                 if (data.hand) {
                     this.latestHand = data.hand;
                     this.hudHand.textContent = `x: ${data.hand.x.toFixed(2)}, y: ${data.hand.y.toFixed(2)}, z: ${data.hand.z.toFixed(2)}`;
+                }
+
+                if (data.hand_landmarks) {
+                    this.latestHandLandmarks = data.hand_landmarks;
                 }
             } catch (err) {
                 console.error('Failed to parse telemetry payload:', err);
@@ -305,13 +361,12 @@ class DioramaScene {
         const width = window.innerWidth;
         const height = window.innerHeight;
 
-        // Translate head telemetry coordinate limits [-1.0, 1.0] into camera target displacement
+        // Translate head telemetry [-1.0, 1.0] into camera displacement
         const targetCamX = this.latestHead.x * PARALLAX_SENSITIVITY_X;
-        const targetCamY = 1.8 + (this.latestHead.y * PARALLAX_SENSITIVITY_Y);
-        // Map head.z depth. Farther head distance pushes camera back slightly
-        const targetCamZ = 8.0 - (this.latestHead.z * 1.5);
+        const targetCamY = 1.5 + (this.latestHead.y * PARALLAX_SENSITIVITY_Y);
+        const targetCamZ = 6.0 - (this.latestHead.z * 1.5);
 
-        // Smoothly interpolate camera position (Lerp) to damp sudden movement spikes
+        // Smoothly interpolate camera position (Lerp) for stability
         this.camera.position.x += (targetCamX - this.camera.position.x) * 0.15;
         this.camera.position.y += (targetCamY - this.camera.position.y) * 0.15;
         this.camera.position.z += (targetCamZ - this.camera.position.z) * 0.15;
@@ -321,17 +376,17 @@ class DioramaScene {
         const yOffset = this.latestHead.y * FRUSTUM_WARP_SENSITIVITY_Y;
 
         this.camera.setViewOffset(
-            width, height,     // Full virtual film dimensions
-            xOffset, yOffset,  // Pixel horizontal/vertical film offset
-            width, height      // Sub-view rendering dimensions (full canvas)
+            width, height,
+            xOffset, yOffset,
+            width, height
         );
 
-        // Keep camera focused on centerpiece coordinate region
-        this.camera.lookAt(0, 1.0, 0);
+        // Camera always looks straight into the hall
+        this.camera.lookAt(0, 1.5, 0);
     }
 
     /**
-     * Process Hand coordinates and relocate the invisible occluder mesh.
+     * Process Hand coordinates and relocate the 21-joint skeleton occluder.
      */
     applyShadowOcclusion() {
         // Map normalized telemetry [-1.0, 1.0] to custom Three.js world boundaries
@@ -339,19 +394,38 @@ class DioramaScene {
         const targetY = THREE.MathUtils.mapLinear(this.latestHand.y, -1.0, 1.0, OCCLUDER_MIN_Y, OCCLUDER_MAX_Y);
         const targetZ = THREE.MathUtils.mapLinear(this.latestHand.z, -1.0, 1.0, OCCLUDER_MIN_Z, OCCLUDER_MAX_Z);
 
-        // Check if hand is detected (i.e. not at default resting origin coordinate)
         const isHandDetected = Math.abs(this.latestHand.x) > 0.001 || Math.abs(this.latestHand.y) > 0.001;
 
         if (isHandDetected) {
-            // Smoothly move hand occluder mesh towards coordinate target
+            // Smoothly move hand occluder center towards wrist coordinate target
             this.handOccluder.position.x += (targetX - this.handOccluder.position.x) * 0.25;
             this.handOccluder.position.y += (targetY - this.handOccluder.position.y) * 0.25;
             this.handOccluder.position.z += (targetZ - this.handOccluder.position.z) * 0.25;
+
+            // Position all 21 individual joint spheres if landmarks array is available
+            if (this.latestHandLandmarks && this.latestHandLandmarks.length === 21) {
+                for (let i = 0; i < 21; i++) {
+                    const lm = this.latestHandLandmarks[i];
+                    const lmX = THREE.MathUtils.mapLinear(lm.x, -1.0, 1.0, OCCLUDER_MIN_X, OCCLUDER_MAX_X);
+                    const lmY = THREE.MathUtils.mapLinear(lm.y, -1.0, 1.0, OCCLUDER_MIN_Y, OCCLUDER_MAX_Y);
+                    const lmZ = THREE.MathUtils.mapLinear(lm.z, -1.0, 1.0, OCCLUDER_MIN_Z, OCCLUDER_MAX_Z);
+
+                    const sphere = this.handRigSpheres[i];
+                    sphere.position.x += (lmX - sphere.position.x) * 0.35;
+                    sphere.position.y += (lmY - sphere.position.y) * 0.35;
+                    sphere.position.z += (lmZ - sphere.position.z) * 0.35;
+                }
+            }
         } else {
-            // Smoothly return occluder behind/below scenery out of viewport frustum
+            // Smoothly return all occluders out of frame when no hand detected
             this.handOccluder.position.x += (0.0 - this.handOccluder.position.x) * 0.1;
-            this.handOccluder.position.y += (-5.0 - this.handOccluder.position.y) * 0.1;
+            this.handOccluder.position.y += (-10.0 - this.handOccluder.position.y) * 0.1;
             this.handOccluder.position.z += (2.0 - this.handOccluder.position.z) * 0.1;
+
+            for (let i = 0; i < this.handRigSpheres.length; i++) {
+                const sphere = this.handRigSpheres[i];
+                sphere.position.y += (-10.0 - sphere.position.y) * 0.1;
+            }
         }
     }
 
