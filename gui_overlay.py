@@ -50,12 +50,12 @@ class TransparentOverlay(QMainWindow):
         # - FramelessWindowHint: Removes title bar and OS borders.
         # - WindowStaysOnTopHint: Forces window to render above other applications.
         # - SubWindow: Prevents creating a separate taskbar entry on some platforms.
-        # - TransparentForMouseEvents: Enables OS-level click-passthrough.
+        # - WindowTransparentForInput: Enables OS-level click-passthrough.
         self.setWindowFlags(
             Qt.WindowType.FramelessWindowHint |
             Qt.WindowType.WindowStaysOnTopHint |
             Qt.WindowType.SubWindow |
-            Qt.WindowType.TransparentForMouseEvents
+            Qt.WindowType.WindowTransparentForInput
         )
 
         # Translucent widget background configuration

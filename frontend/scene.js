@@ -52,8 +52,10 @@ class DioramaScene {
         // Telemetry state
         this.latestHead = { x: 0, y: 0, z: 0 };
         this.latestHand = { x: 0, y: 0, z: 0 };
+        this.latestHandLandmarks = [];
         this.socket = null;
         this.reconnectAttempt = 0;
+        this.handRigSpheres = [];
 
         // Performance metrics
         this.frameCount = 0;
@@ -143,21 +145,36 @@ class DioramaScene {
     }
 
     /**
-     * Create an invisible mesh proxy for the hand.
-     * This casts a dynamic shadow representing the user's hand movements.
+     * Create an invisible 21-joint skeleton rig for the hand.
+     * Each joint casts a dynamic shadow representing the user's actual hand posture.
      */
     createHandOccluder() {
-        // A low-poly sphere proxy acting as the hand center of mass
-        const geometry = new THREE.SphereGeometry(0.45, 16, 16);
-        const material = new THREE.MeshBasicMaterial({
-            color: 0xff0000,
+        this.handRigGroup = new THREE.Group();
+        this.handRigSpheres = [];
+
+        const jointGeo = new THREE.SphereGeometry(0.18, 12, 12);
+        const jointMat = new THREE.MeshBasicMaterial({
+            color: 0x00ff88,
             visible: false // Invisible to the user, still casts shadow
         });
 
-        this.handOccluder = new THREE.Mesh(geometry, material);
+        // 21 MediaPipe hand landmarks
+        for (let i = 0; i < 21; i++) {
+            const sphere = new THREE.Mesh(jointGeo, jointMat);
+            sphere.castShadow = true;
+            sphere.position.set(0, -10, 0); // Start out-of-frame
+            this.handRigGroup.add(sphere);
+            this.handRigSpheres.push(sphere);
+        }
+
+        // Also add a central palm volume proxy
+        const palmGeo = new THREE.SphereGeometry(0.35, 16, 16);
+        this.handOccluder = new THREE.Mesh(palmGeo, jointMat);
         this.handOccluder.castShadow = true;
-        this.handOccluder.position.set(0, 1.2, 2.0); // Default home position
-        this.scene.add(this.handOccluder);
+        this.handOccluder.position.set(0, 1.2, 2.0);
+        this.handRigGroup.add(this.handOccluder);
+
+        this.scene.add(this.handRigGroup);
     }
 
     /**
@@ -260,6 +277,10 @@ class DioramaScene {
                     this.latestHand = data.hand;
                     this.hudHand.textContent = `x: ${data.hand.x.toFixed(2)}, y: ${data.hand.y.toFixed(2)}, z: ${data.hand.z.toFixed(2)}`;
                 }
+
+                if (data.hand_landmarks) {
+                    this.latestHandLandmarks = data.hand_landmarks;
+                }
             } catch (err) {
                 console.error('Failed to parse telemetry payload:', err);
             }
@@ -331,7 +352,7 @@ class DioramaScene {
     }
 
     /**
-     * Process Hand coordinates and relocate the invisible occluder mesh.
+     * Process Hand coordinates and relocate the 21-joint skeleton occluder.
      */
     applyShadowOcclusion() {
         // Map normalized telemetry [-1.0, 1.0] to custom Three.js world boundaries
@@ -339,19 +360,38 @@ class DioramaScene {
         const targetY = THREE.MathUtils.mapLinear(this.latestHand.y, -1.0, 1.0, OCCLUDER_MIN_Y, OCCLUDER_MAX_Y);
         const targetZ = THREE.MathUtils.mapLinear(this.latestHand.z, -1.0, 1.0, OCCLUDER_MIN_Z, OCCLUDER_MAX_Z);
 
-        // Check if hand is detected (i.e. not at default resting origin coordinate)
         const isHandDetected = Math.abs(this.latestHand.x) > 0.001 || Math.abs(this.latestHand.y) > 0.001;
 
         if (isHandDetected) {
-            // Smoothly move hand occluder mesh towards coordinate target
+            // Smoothly move hand occluder center towards wrist coordinate target
             this.handOccluder.position.x += (targetX - this.handOccluder.position.x) * 0.25;
             this.handOccluder.position.y += (targetY - this.handOccluder.position.y) * 0.25;
             this.handOccluder.position.z += (targetZ - this.handOccluder.position.z) * 0.25;
+
+            // Position all 21 individual joint spheres if landmarks array is available
+            if (this.latestHandLandmarks && this.latestHandLandmarks.length === 21) {
+                for (let i = 0; i < 21; i++) {
+                    const lm = this.latestHandLandmarks[i];
+                    const lmX = THREE.MathUtils.mapLinear(lm.x, -1.0, 1.0, OCCLUDER_MIN_X, OCCLUDER_MAX_X);
+                    const lmY = THREE.MathUtils.mapLinear(lm.y, -1.0, 1.0, OCCLUDER_MIN_Y, OCCLUDER_MAX_Y);
+                    const lmZ = THREE.MathUtils.mapLinear(lm.z, -1.0, 1.0, OCCLUDER_MIN_Z, OCCLUDER_MAX_Z);
+
+                    const sphere = this.handRigSpheres[i];
+                    sphere.position.x += (lmX - sphere.position.x) * 0.35;
+                    sphere.position.y += (lmY - sphere.position.y) * 0.35;
+                    sphere.position.z += (lmZ - sphere.position.z) * 0.35;
+                }
+            }
         } else {
-            // Smoothly return occluder behind/below scenery out of viewport frustum
+            // Smoothly return all occluders out of frame when no hand detected
             this.handOccluder.position.x += (0.0 - this.handOccluder.position.x) * 0.1;
-            this.handOccluder.position.y += (-5.0 - this.handOccluder.position.y) * 0.1;
+            this.handOccluder.position.y += (-10.0 - this.handOccluder.position.y) * 0.1;
             this.handOccluder.position.z += (2.0 - this.handOccluder.position.z) * 0.1;
+
+            for (let i = 0; i < this.handRigSpheres.length; i++) {
+                const sphere = this.handRigSpheres[i];
+                sphere.position.y += (-10.0 - sphere.position.y) * 0.1;
+            }
         }
     }
 

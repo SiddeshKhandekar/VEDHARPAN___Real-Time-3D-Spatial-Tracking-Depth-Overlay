@@ -1,13 +1,14 @@
 """
-vision_pipeline.py — VEDHARPAN Phase 1: AI Vision Backend
+vision_pipeline.py — VEDHARPAN Phase 1 & 2: AI Vision Backend
 
 Responsibility:
     Manages all webcam I/O and real-time computer vision inference. Runs two
     MediaPipe models simultaneously on each captured frame:
         1. Face Mesh  → extracts the user's interpupillary midpoint (eye bridge)
                         and computes a normalized (x, y, z) head/parallax vector.
-        2. Hands      → extracts the wrist anchor of the dominant hand and
-                        computes a normalized (x, y, z) shadow-occluder vector.
+        2. Hands      → extracts all 21 landmark positions for the dominant hand,
+                        providing both the wrist anchor (shadow-occluder center)
+                        and the full 21-point skeleton for a hand-shaped shadow rig.
 
     All raw landmark coordinates are passed through independent Exponential
     Moving Average (EMA) filters before being placed on the output queue:
@@ -35,7 +36,7 @@ import queue
 import threading
 import time
 from dataclasses import dataclass, field
-from typing import Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import cv2
 import mediapipe as mp
@@ -103,13 +104,18 @@ class TelemetryFrame:
     """A single telemetry snapshot emitted from the vision pipeline.
 
     Attributes:
-        head:      Smoothed head/eye spatial vector for parallax computation.
-        hand:      Smoothed hand/wrist spatial vector for shadow occlusion.
-        timestamp: Unix epoch seconds at the moment of capture.
+        head:            Smoothed head/eye spatial vector for parallax computation.
+        hand:            Smoothed hand/wrist spatial vector for shadow occlusion center.
+        hand_landmarks:  All 21 normalized hand landmark points for building a
+                         hand-shaped shadow rig in the frontend. Each entry is a
+                         dict with keys 'x', 'y', 'z' in the range [-1.0, 1.0].
+                         Empty list when no hand is detected.
+        timestamp:       Unix epoch seconds at the moment of capture.
     """
-    head:      SpatialVector = field(default_factory=SpatialVector)
-    hand:      SpatialVector = field(default_factory=SpatialVector)
-    timestamp: float         = field(default_factory=time.time)
+    head:            SpatialVector            = field(default_factory=SpatialVector)
+    hand:            SpatialVector            = field(default_factory=SpatialVector)
+    hand_landmarks:  List[Dict[str, float]]   = field(default_factory=list)
+    timestamp:       float                    = field(default_factory=time.time)
 
 
 # ---------------------------------------------------------------------------
@@ -521,7 +527,7 @@ class VisionPipeline:
             raw_head = self._extract_head_vector(
                 face_results, frame_width, frame_height
             )
-            raw_hand = self._extract_hand_vector(
+            raw_hand, raw_landmarks = self._extract_hand_vector(
                 hand_results, frame_width, frame_height
             )
 
@@ -531,10 +537,12 @@ class VisionPipeline:
 
             # --- Build and enqueue the telemetry frame ---
             telemetry = TelemetryFrame(
-                head      = smooth_head,
-                hand      = smooth_hand,
-                timestamp = time.time(),
+                head           = smooth_head,
+                hand           = smooth_hand,
+                hand_landmarks = raw_landmarks,  # Raw: EMA on 21 pts is too costly
+                timestamp      = time.time(),
             )
+
 
             try:
                 # Discard oldest frame rather than block the inference loop.
@@ -612,14 +620,16 @@ class VisionPipeline:
         hand_results,
         frame_width:  int,
         frame_height: int,
-    ) -> SpatialVector:
-        """Extract a raw (un-smoothed) hand spatial vector from Hands results.
+    ) -> Tuple[SpatialVector, List[Dict[str, float]]]:
+        """Extract a raw (un-smoothed) hand vector and all 21 landmark positions.
 
-        Anchors to the WRIST landmark for a stable centre-of-mass position
-        and computes depth from the bounding-box diagonal of the full hand.
+        Returns both the wrist-anchored center-of-mass vector (for EMA smoothing
+        and the occluder center) and a full 21-point landmark list (for building
+        a hand-shaped occluder rig in the Three.js frontend).
 
         If no hand is detected, resets the EMA filter and returns the origin
-        so the occluder gently returns to a neutral resting position.
+        vector and an empty landmark list, so the occluder gently returns to
+        a neutral resting position.
 
         Args:
             hand_results: The output of self._hands.process().
@@ -627,11 +637,13 @@ class VisionPipeline:
             frame_height: Pixel height of the current frame.
 
         Returns:
-            A raw SpatialVector for the hand position.
+            A tuple of (SpatialVector, List[Dict]) where the list contains
+            exactly 21 dicts each with keys 'x', 'y', 'z' in [-1.0, 1.0],
+            or an empty list when no hand is detected.
         """
         if not hand_results.multi_hand_landmarks:
             self._hand_ema.reset()
-            return SpatialVector(0.0, 0.0, 0.0)
+            return SpatialVector(0.0, 0.0, 0.0), []
 
         hand_landmarks = hand_results.multi_hand_landmarks[0]
         wrist          = hand_landmarks.landmark[WRIST_LANDMARK_IDX]
@@ -644,4 +656,23 @@ class VisionPipeline:
         )
         norm_z = _estimate_hand_depth(hand_landmarks, frame_width, frame_height)
 
-        return SpatialVector(x=norm_x, y=norm_y, z=norm_z)
+        # Collect all 21 normalised landmark points for the frontend rig.
+        # MediaPipe z is relative depth in the palm plane; we remap it to [-1, 1].
+        all_landmarks: List[Dict[str, float]] = []
+        for lm in hand_landmarks.landmark:
+            lm_norm_x, lm_norm_y = _normalise_pixel(
+                lm.x * frame_width,
+                lm.y * frame_height,
+                frame_width,
+                frame_height,
+            )
+            # MediaPipe hand z is already relative to wrist in a normalised range;
+            # clamp it to [-1, 1] for wire consistency.
+            lm_norm_z = float(np.clip(lm.z * 5.0, -1.0, 1.0))
+            all_landmarks.append({
+                "x": round(lm_norm_x, 5),
+                "y": round(lm_norm_y, 5),
+                "z": round(lm_norm_z, 5),
+            })
+
+        return SpatialVector(x=norm_x, y=norm_y, z=norm_z), all_landmarks

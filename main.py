@@ -35,12 +35,14 @@ Test with the bundled verify_stream.py script:
 import asyncio
 import json
 import logging
+import os
 import queue
 import signal
 import sys
 import threading
 import time
 from typing import Set
+
 
 
 import websockets
@@ -304,6 +306,7 @@ class TelemetryBroker:
                 "y": round(frame.hand.y, 6),
                 "z": round(frame.hand.z, 6),
             },
+            "hand_landmarks": frame.hand_landmarks,
             "timestamp": round(frame.timestamp, 6),
         }
         return json.dumps(payload, separators=(",", ":"))
