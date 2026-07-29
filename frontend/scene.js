@@ -61,6 +61,12 @@ class DioramaScene {
         this.frameCount = 0;
         this.lastFpsUpdate = performance.now();
 
+        // Mouse Drag Controls State
+        this.isDragging = false;
+        this.previousMousePosition = { x: 0, y: 0 };
+        this.orbitYaw = 0;
+        this.orbitPitch = 0;
+
         // Boot system
         this.init();
     }
@@ -112,6 +118,30 @@ class DioramaScene {
                 }
             });
         }
+
+        // Mouse Drag Orbit Controls
+        this.renderer.domElement.addEventListener('mousedown', (e) => {
+            this.isDragging = true;
+            this.previousMousePosition = { x: e.offsetX, y: e.offsetY };
+        });
+
+        this.renderer.domElement.addEventListener('mousemove', (e) => {
+            if (this.isDragging) {
+                const deltaX = e.offsetX - this.previousMousePosition.x;
+                const deltaY = e.offsetY - this.previousMousePosition.y;
+
+                this.orbitYaw -= deltaX * 0.005;
+                this.orbitPitch -= deltaY * 0.005;
+
+                // Clamp pitch to prevent flipping
+                this.orbitPitch = Math.max(-Math.PI / 2 + 0.1, Math.min(Math.PI / 2 - 0.1, this.orbitPitch));
+
+                this.previousMousePosition = { x: e.offsetX, y: e.offsetY };
+            }
+        });
+
+        this.renderer.domElement.addEventListener('mouseup', () => { this.isDragging = false; });
+        this.renderer.domElement.addEventListener('mouseleave', () => { this.isDragging = false; });
 
         // 8. Connect to WebSocket Telemetry Server
         this.connectTelemetry();
@@ -355,16 +385,36 @@ class DioramaScene {
     }
 
     /**
-     * Dynamic Camera Parallax warping and off-axis viewport offset calculations.
+     * Dynamic Camera Parallax warping and off-axis viewport offset calculations
+     * with integrated spherical mouse orbit control.
      */
     applyParallax() {
         const width = window.innerWidth;
         const height = window.innerHeight;
 
-        // Translate head telemetry [-1.0, 1.0] into camera displacement
-        const targetCamX = this.latestHead.x * PARALLAX_SENSITIVITY_X;
-        const targetCamY = 1.5 + (this.latestHead.y * PARALLAX_SENSITIVITY_Y);
-        const targetCamZ = 6.0 - (this.latestHead.z * 1.5);
+        // Base orbit radius
+        const radius = 6.0;
+        const headZOffset = this.latestHead.z * 1.5;
+        const actualRadius = radius - headZOffset;
+
+        // Convert orbitYaw and orbitPitch to Spherical coordinates
+        const phi = Math.PI / 2 - this.orbitPitch;
+        const theta = this.orbitYaw;
+
+        const orbitX = actualRadius * Math.sin(phi) * Math.sin(theta);
+        const orbitY = 1.5 + actualRadius * Math.cos(phi);
+        const orbitZ = actualRadius * Math.sin(phi) * Math.cos(theta);
+
+        // Add Parallax (Head Tracking) offsets perpendicular to the look direction
+        const rightX = Math.cos(theta);
+        const rightZ = -Math.sin(theta);
+
+        const parallaxX = this.latestHead.x * PARALLAX_SENSITIVITY_X;
+        const parallaxY = this.latestHead.y * PARALLAX_SENSITIVITY_Y;
+
+        const targetCamX = orbitX + (parallaxX * rightX);
+        const targetCamY = orbitY + parallaxY;
+        const targetCamZ = orbitZ + (parallaxX * rightZ);
 
         // Smoothly interpolate camera position (Lerp) for stability
         this.camera.position.x += (targetCamX - this.camera.position.x) * 0.15;
@@ -381,7 +431,7 @@ class DioramaScene {
             width, height
         );
 
-        // Camera always looks straight into the hall
+        // Camera always looks at the center (0, 1.5, 0)
         this.camera.lookAt(0, 1.5, 0);
     }
 
