@@ -228,10 +228,15 @@ class TelemetryBroker:
         self._connected_clients.add(websocket)
 
         try:
-            # Keep the connection open until the client disconnects.
-            # We don't expect inbound messages in this protocol, but
-            # awaiting here prevents the handler from returning immediately.
-            await websocket.wait_closed()
+            async for message in websocket:
+                try:
+                    data = json.loads(message)
+                    if data.get("command") == "shutdown":
+                        logger.info("TelemetryBroker: Shutdown command received from client.")
+                        import os, signal
+                        os.kill(os.getpid(), signal.SIGINT)
+                except json.JSONDecodeError:
+                    pass
         finally:
             self._connected_clients.discard(websocket)
             logger.info("TelemetryBroker: Client disconnected — %s.", client_address)

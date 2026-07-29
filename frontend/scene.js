@@ -103,6 +103,15 @@ class DioramaScene {
 
         // 7. Event Listeners
         window.addEventListener('resize', () => this.onWindowResize());
+        
+        const disconnectBtn = document.getElementById('disconnect-btn');
+        if (disconnectBtn) {
+            disconnectBtn.addEventListener('click', () => {
+                if (this.socket && this.socket.readyState === WebSocket.OPEN) {
+                    this.socket.send(JSON.stringify({command: "shutdown"}));
+                }
+            });
+        }
 
         // 8. Connect to WebSocket Telemetry Server
         this.connectTelemetry();
