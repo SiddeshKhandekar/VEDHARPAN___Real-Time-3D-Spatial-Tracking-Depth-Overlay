@@ -28,10 +28,10 @@ I am building this project iteratively, focusing on mathematical precision and f
 
 - [x] **Phase 0: Environment & Architecture Setup**
   - Configured repository structure, MIT licensing, and strict `.gitignore` rules for media and model caching.
-- [ ] **Phase 1: The Vision Pipeline (`vision_pipeline.py`)**
+- [x] **Phase 1: The Vision Pipeline (`vision_pipeline.py`)**
   - Integrate OpenCV and MediaPipe Hands for multi-threaded webcam streaming.
   - Implement depth ($z$-axis) approximation and EMA coordinate smoothing.
-- [ ] **Phase 2: The Overlay Engine (`gui_overlay.py`)**
+- [x] **Phase 2: The Overlay Engine (`gui_overlay.py`)**
   - Build a custom, transparent PyQt6 window with "always-on-top" and mouse-click passthrough flags.
   - Create the dynamic alpha-blended silhouette rendering logic.
 - [ ] **Phase 3: Pipeline Integration (`main.py`)**
