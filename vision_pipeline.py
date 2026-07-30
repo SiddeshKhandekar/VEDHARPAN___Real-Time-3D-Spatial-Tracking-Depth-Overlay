@@ -660,8 +660,11 @@ class VisionPipeline:
         # MediaPipe z is relative depth in the palm plane; we remap it to [-1, 1].
         all_landmarks: List[Dict[str, float]] = []
         for lm in hand_landmarks.landmark:
+            # Invert the X coordinate to fix the hand mirror/chirality issue
+            mirrored_pixel_x = (1.0 - lm.x) * frame_width  # <--- Mirrors the X axis
+            
             lm_norm_x, lm_norm_y = _normalise_pixel(
-                lm.x * frame_width,
+                mirrored_pixel_x,                          # <--- Pass the mirrored X here
                 lm.y * frame_height,
                 frame_width,
                 frame_height,
