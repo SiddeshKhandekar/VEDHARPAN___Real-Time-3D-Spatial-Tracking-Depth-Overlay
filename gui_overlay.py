@@ -45,22 +45,12 @@ class TransparentOverlay(QMainWindow):
         logger.info("TransparentOverlay: GUI window successfully initialized.")
 
     def _configure_window_properties(self) -> None:
-        """Applies transparent, frameless, stay-on-top, and click-passthrough flags."""
-        # Window flags:
-        # - FramelessWindowHint: Removes title bar and OS borders.
-        # - WindowStaysOnTopHint: Forces window to render above other applications.
-        # - SubWindow: Prevents creating a separate taskbar entry on some platforms.
-        # - WindowTransparentForInput: Enables OS-level click-passthrough.
-        self.setWindowFlags(
-            Qt.WindowType.FramelessWindowHint |
-            Qt.WindowType.WindowStaysOnTopHint |
-            Qt.WindowType.SubWindow |
-            Qt.WindowType.WindowTransparentForInput
-        )
-
-        # Translucent widget background configuration
-        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
-        self.setStyleSheet("background: transparent;")
+        """Applies standard window properties (opaque, framed, standard input)."""
+        self.setWindowTitle("VEDHARPAN 3D Viewport")
+        
+        # Set window size to a standard desktop window size initially
+        self.setGeometry(100, 100, 1280, 720)
+        logger.info("TransparentOverlay: Opaque window created.")
 
         # Set window size to match primary screen geometry
         screen = QApplication.primaryScreen()
@@ -75,11 +65,10 @@ class TransparentOverlay(QMainWindow):
         """Creates and configures the embedded QWebEngineView."""
         self.web_view = QWebEngineView(self)
         self.web_view.setGeometry(self.rect())
-        self.web_view.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
-        self.web_view.setStyleSheet("background: transparent;")
+        self.web_view.setStyleSheet("background: white;")
         
-        # Prevent page background filling with solid colors
-        self.web_view.page().setBackgroundColor(Qt.GlobalColor.transparent)
+        # Set page background filling to white
+        self.web_view.page().setBackgroundColor(Qt.GlobalColor.white)
 
         # Allow local content to access file schemes and cross-origin urls
         settings = self.web_view.settings()

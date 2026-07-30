@@ -61,6 +61,12 @@ class DioramaScene {
         this.frameCount = 0;
         this.lastFpsUpdate = performance.now();
 
+        // Mouse Drag Controls State
+        this.isDragging = false;
+        this.previousMousePosition = { x: 0, y: 0 };
+        this.orbitYaw = 0;
+        this.orbitPitch = 0;
+
         // Boot system
         this.init();
     }
@@ -113,6 +119,30 @@ class DioramaScene {
             });
         }
 
+        // Mouse Drag Orbit Controls
+        this.renderer.domElement.addEventListener('mousedown', (e) => {
+            this.isDragging = true;
+            this.previousMousePosition = { x: e.offsetX, y: e.offsetY };
+        });
+
+        this.renderer.domElement.addEventListener('mousemove', (e) => {
+            if (this.isDragging) {
+                const deltaX = e.offsetX - this.previousMousePosition.x;
+                const deltaY = e.offsetY - this.previousMousePosition.y;
+
+                this.orbitYaw -= deltaX * 0.005;
+                this.orbitPitch -= deltaY * 0.005;
+
+                // Clamp pitch to prevent flipping
+                this.orbitPitch = Math.max(-Math.PI / 2 + 0.1, Math.min(Math.PI / 2 - 0.1, this.orbitPitch));
+
+                this.previousMousePosition = { x: e.offsetX, y: e.offsetY };
+            }
+        });
+
+        this.renderer.domElement.addEventListener('mouseup', () => { this.isDragging = false; });
+        this.renderer.domElement.addEventListener('mouseleave', () => { this.isDragging = false; });
+
         // 8. Connect to WebSocket Telemetry Server
         this.connectTelemetry();
 
@@ -132,10 +162,10 @@ class DioramaScene {
         const hemisphereLight = new THREE.HemisphereLight(0x7ec0ff, 0x111122, 0.35);
         this.scene.add(hemisphereLight);
 
-        // Primary Shadow-casting Directional Light — positioned above and in front
-        // so shadows project onto the floor and walls visibly.
+        // Primary Shadow-casting Directional Light — positioned high behind the camera
+        // so shadows project directly forward onto the stairs.
         this.dirLight = new THREE.DirectionalLight(0xfff5e6, 4.0);
-        this.dirLight.position.set(3, 10, 6);
+        this.dirLight.position.set(0, 12, 10);
         this.dirLight.target.position.set(0, 0, 0);
         this.dirLight.castShadow = true;
 
@@ -223,29 +253,33 @@ class DioramaScene {
             });
         };
 
-        // 1. Load Room Environment — position and rotate so the hall faces the camera head-on
+        // 1. Load Room Environment
         loader.load(
             `${assetPath}urban_design_vr_room.glb`,
             (gltf) => {
                 this.roomModel = gltf.scene;
-                // Centre room at origin; rotate 180° on Y so we look into the hall
+                // Centre room at origin; default rotation (0,0,0) faces the stairs going UP
                 this.roomModel.position.set(0, 0, 0);
-                this.roomModel.rotation.set(0, Math.PI, 0);
+                this.roomModel.rotation.set(0, 0, 0);
                 this.roomModel.scale.set(1.2, 1.2, 1.2);
                 configureShadows(this.roomModel, false, true); // Room only receives shadows
                 this.scene.add(this.roomModel);
-                console.log('Loaded: Room Environment (rotated to face camera)');
+                console.log('Loaded: Room Environment');
             },
             undefined,
             (error) => console.error('Error loading Room Model:', error)
         );
 
-        // 2. Load Mecha — centered on the floor of the room
+        // 2. Load Mecha — placed on the stairs
         loader.load(
             `${assetPath}mecha.glb`,
             (gltf) => {
                 this.mechaModel = gltf.scene;
-                this.mechaModel.position.set(0, 0, 0);
+                // Position on the bottom of the stairs (Z=0). Y=1.5 prevents clipping into the floor.
+                // The mecha natively faces the camera (+Z).
+                // We rotate it 180 degrees (Math.PI) on Y to make it face -Z (up the stairs).
+                this.mechaModel.position.set(0, 1.5, 0);
+                this.mechaModel.rotation.set(0, Math.PI, 0);
                 this.mechaModel.scale.set(0.6, 0.6, 0.6);
                 configureShadows(this.mechaModel, true, true);
                 this.scene.add(this.mechaModel);
@@ -255,21 +289,23 @@ class DioramaScene {
             (error) => console.error('Error loading Mecha Model:', error)
         );
 
-        // 3. Load Tires — scattered around the mecha on the floor
+        // 3. Load Tires — scattered around the stairs and hall
         loader.load(
             `${assetPath}game_ready_free_car_tires.glb`,
             (gltf) => {
-                // Clone and scatter multiple tire groups around mecha
+                // Scatter multiple tire groups everywhere in the hall
                 const tirePositions = [
-                    { x: -1.5, z:  1.2, rotY: 0.3 },
-                    { x:  1.8, z:  0.5, rotY: -0.5 },
-                    { x: -0.8, z: -1.5, rotY: 1.2 },
-                    { x:  1.2, z: -1.0, rotY: 2.0 },
+                    { x: -1.5, y: 1.2, z:  0.5, rotY: 0.3 },
+                    { x:  1.8, y: 1.5, z: -1.0, rotY: -0.5 },
+                    { x: -0.8, y: 1.8, z: -2.5, rotY: 1.2 },
+                    { x:  1.2, y: 2.2, z: -4.0, rotY: 2.0 },
+                    { x: -2.0, y: 0.5, z:  2.0, rotY: 0.8 },
+                    { x:  2.5, y: 0.8, z:  1.5, rotY: 1.5 },
                 ];
 
                 tirePositions.forEach((pos, idx) => {
                     const tireClone = gltf.scene.clone();
-                    tireClone.position.set(pos.x, 0, pos.z);
+                    tireClone.position.set(pos.x, pos.y, pos.z);
                     tireClone.rotation.y = pos.rotY;
                     tireClone.scale.set(0.4, 0.4, 0.4);
                     configureShadows(tireClone, true, true);
@@ -355,16 +391,36 @@ class DioramaScene {
     }
 
     /**
-     * Dynamic Camera Parallax warping and off-axis viewport offset calculations.
+     * Dynamic Camera Parallax warping and off-axis viewport offset calculations
+     * with integrated spherical mouse orbit control.
      */
     applyParallax() {
         const width = window.innerWidth;
         const height = window.innerHeight;
 
-        // Translate head telemetry [-1.0, 1.0] into camera displacement
-        const targetCamX = this.latestHead.x * PARALLAX_SENSITIVITY_X;
-        const targetCamY = 1.5 + (this.latestHead.y * PARALLAX_SENSITIVITY_Y);
-        const targetCamZ = 6.0 - (this.latestHead.z * 1.5);
+        // Base orbit radius
+        const radius = 6.0;
+        const headZOffset = this.latestHead.z * 1.5;
+        const actualRadius = radius - headZOffset;
+
+        // Convert orbitYaw and orbitPitch to Spherical coordinates
+        const phi = Math.PI / 2 - this.orbitPitch;
+        const theta = this.orbitYaw;
+
+        const orbitX = actualRadius * Math.sin(phi) * Math.sin(theta);
+        const orbitY = 1.5 + actualRadius * Math.cos(phi);
+        const orbitZ = actualRadius * Math.sin(phi) * Math.cos(theta);
+
+        // Add Parallax (Head Tracking) offsets perpendicular to the look direction
+        const rightX = Math.cos(theta);
+        const rightZ = -Math.sin(theta);
+
+        const parallaxX = this.latestHead.x * PARALLAX_SENSITIVITY_X;
+        const parallaxY = this.latestHead.y * PARALLAX_SENSITIVITY_Y;
+
+        const targetCamX = orbitX + (parallaxX * rightX);
+        const targetCamY = orbitY + parallaxY;
+        const targetCamZ = orbitZ + (parallaxX * rightZ);
 
         // Smoothly interpolate camera position (Lerp) for stability
         this.camera.position.x += (targetCamX - this.camera.position.x) * 0.15;
@@ -381,7 +437,7 @@ class DioramaScene {
             width, height
         );
 
-        // Camera always looks straight into the hall
+        // Camera always looks at the center (0, 1.5, 0)
         this.camera.lookAt(0, 1.5, 0);
     }
 
