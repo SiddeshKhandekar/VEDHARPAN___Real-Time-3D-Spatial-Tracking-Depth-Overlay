@@ -94,7 +94,7 @@ class DioramaScene {
 
         // 3. Setup Camera — straight eye-level looking into the hall
         const aspect = window.innerWidth / window.innerHeight;
-        this.camera = new THREE.PerspectiveCamera(50, aspect, 0.1, 100);
+        this.camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 5000);
         this.camera.position.set(0, 1.5, 6);
         this.camera.lookAt(0, 1.5, 0);
 
@@ -109,12 +109,12 @@ class DioramaScene {
 
         // 7. Event Listeners
         window.addEventListener('resize', () => this.onWindowResize());
-        
+
         const disconnectBtn = document.getElementById('disconnect-btn');
         if (disconnectBtn) {
             disconnectBtn.addEventListener('click', () => {
                 if (this.socket && this.socket.readyState === WebSocket.OPEN) {
-                    this.socket.send(JSON.stringify({command: "shutdown"}));
+                    this.socket.send(JSON.stringify({ command: "shutdown" }));
                 }
             });
         }
@@ -243,7 +243,7 @@ class DioramaScene {
                 if (child.isMesh) {
                     child.castShadow = cast;
                     child.receiveShadow = receive;
-                    
+
                     // Enhance material reflectivity
                     if (child.material) {
                         child.material.roughness = Math.min(child.material.roughness, 0.8);
@@ -259,8 +259,8 @@ class DioramaScene {
             (gltf) => {
                 this.roomModel = gltf.scene;
                 // Centre room at origin; default rotation (0,0,0) faces the stairs going UP
-                this.roomModel.position.set(0, 0, 0);
-                this.roomModel.rotation.set(0, 0, 0);
+                this.roomModel.position.set(0, -2.7, 0);
+                this.roomModel.rotation.set(0, 1.6, 0);
                 this.roomModel.scale.set(1.2, 1.2, 1.2);
                 configureShadows(this.roomModel, false, true); // Room only receives shadows
                 this.scene.add(this.roomModel);
@@ -278,7 +278,7 @@ class DioramaScene {
                 // Position on the bottom of the stairs (Z=0). Y=1.5 prevents clipping into the floor.
                 // The mecha natively faces the camera (+Z).
                 // We rotate it 180 degrees (Math.PI) on Y to make it face -Z (up the stairs).
-                this.mechaModel.position.set(0, 1.5, 0);
+                this.mechaModel.position.set(0, 300, 2);
                 this.mechaModel.rotation.set(0, Math.PI, 0);
                 this.mechaModel.scale.set(0.6, 0.6, 0.6);
                 configureShadows(this.mechaModel, true, true);
@@ -289,18 +289,56 @@ class DioramaScene {
             (error) => console.error('Error loading Mecha Model:', error)
         );
 
-        // 3. Load Tires — scattered around the stairs and hall
+        // 3. Load Space Globe Background
+        loader.load(
+            `${assetPath}space_globe.glb`,
+            (gltf) => {
+                this.spaceBackground = gltf.scene;
+
+                // Keep it at the origin, scale it to 500 
+                this.spaceBackground.position.set(0, 0, 0);
+                this.spaceBackground.scale.set(500, 500, 500);
+
+                this.spaceBackground.rotation.y = THREE.MathUtils.degToRad(180);
+
+                this.spaceBackground.traverse((child) => {
+                    // Check if it's a mesh and has a material
+                    if (child.isMesh && child.material) {
+
+                        // 1. THE MOST IMPORTANT FIX: Tell the stars to ignore scene fog!
+                        child.material.fog = false;
+
+                        // 2. Render on the inside (your file actually sets doubleSided: true by default, but this enforces it)
+                        child.material.side = THREE.BackSide;
+
+                        // 3. Ensure the glowing emissive texture is at full brightness
+                        child.material.emissiveIntensity = 1;
+
+                        // 4. Force it to stay in the background
+                        child.material.depthWrite = false;
+                        child.renderOrder = -1;
+                    }
+                });
+
+                this.scene.add(this.spaceBackground);
+                console.log('Loaded: Space 360 Background');
+            },
+            undefined,
+            (error) => console.error('Error loading Space Globe:', error)
+        );
+
+        // 4. Load Tires — scattered around the stairs and hall
         loader.load(
             `${assetPath}game_ready_free_car_tires.glb`,
             (gltf) => {
                 // Scatter multiple tire groups everywhere in the hall
                 const tirePositions = [
-                    { x: -1.5, y: 1.2, z:  0.5, rotY: 0.3 },
-                    { x:  1.8, y: 1.5, z: -1.0, rotY: -0.5 },
+                    { x: -1.5, y: 0, z: 0.5, rotY: 0.3 },
+                    { x: 1.8, y: 5, z: -1.0, rotY: -0.5 },
                     { x: -0.8, y: 1.8, z: -2.5, rotY: 1.2 },
-                    { x:  1.2, y: 2.2, z: -4.0, rotY: 2.0 },
-                    { x: -2.0, y: 0.5, z:  2.0, rotY: 0.8 },
-                    { x:  2.5, y: 0.8, z:  1.5, rotY: 1.5 },
+                    { x: 1.2, y: 2.2, z: -4.0, rotY: 2.0 },
+                    { x: -2.0, y: 0.5, z: 2.0, rotY: 0.8 },
+                    { x: 2.5, y: 0.8, z: 1.5, rotY: 1.5 },
                 ];
 
                 tirePositions.forEach((pos, idx) => {
@@ -338,12 +376,12 @@ class DioramaScene {
         this.socket.onmessage = (event) => {
             try {
                 const data = JSON.parse(event.data);
-                
+
                 if (data.head) {
                     this.latestHead = data.head;
                     this.hudHead.textContent = `x: ${data.head.x.toFixed(2)}, y: ${data.head.y.toFixed(2)}, z: ${data.head.z.toFixed(2)}`;
                 }
-                
+
                 if (data.hand) {
                     this.latestHand = data.hand;
                     this.hudHand.textContent = `x: ${data.hand.x.toFixed(2)}, y: ${data.hand.y.toFixed(2)}, z: ${data.hand.z.toFixed(2)}`;
@@ -361,7 +399,7 @@ class DioramaScene {
             console.log('Telemetry connection closed. Attempting reconnect...');
             this.hudStatus.textContent = 'Disconnected';
             this.hudStatus.className = 'disconnected';
-            
+
             // Reconnect logic with exponential backoff
             const delay = Math.min(
                 RECONNECT_DELAY_BASE_MS * Math.pow(2, this.reconnectAttempt),
