@@ -302,7 +302,7 @@ class TelemetryBroker:
         """
         payload = {
             "head": {
-                "x": round(frame.head.x, 6),
+                "x": round(-frame.head.x, 6),
                 "y": round(frame.head.y, 6),
                 "z": round(frame.head.z, 6),
             },
