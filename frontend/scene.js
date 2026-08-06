@@ -158,7 +158,14 @@ class DioramaScene {
         // 8. Connect to WebSocket Telemetry Server
         this.connectTelemetry();
 
-        // 9. Start Rendering Loop
+        // 9. Initialize Systems
+        this.physicsWorld = new PhysicsWorld();
+        this.physicsWorld.addStairColliders(); // Rough collision for the environment
+        
+        this.inputManager = new InputManager(this.camera, this.renderer.domElement);
+        this.effects = new VisualEffects(this.scene);
+
+        // 10. Start Rendering Loop
         this.animate();
     }
 
