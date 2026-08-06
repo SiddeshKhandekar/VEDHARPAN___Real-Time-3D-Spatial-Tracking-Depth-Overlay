@@ -407,9 +407,10 @@ class VisionPipeline:
         )
 
         self._hands = mp_hands.Hands(
+            model_complexity         = 1,      # Higher accuracy over a larger radius
             max_num_hands            = 2,
-            min_detection_confidence = 0.7,
-            min_tracking_confidence  = 0.6,
+            min_detection_confidence = 0.4,
+            min_tracking_confidence  = 0.4,
         )
 
         logger.info("VisionPipeline: MediaPipe Face Mesh and Hands initialised.")
