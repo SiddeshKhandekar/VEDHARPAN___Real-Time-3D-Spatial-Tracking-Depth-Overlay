@@ -1,5 +1,9 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { PhysicsWorld } from './physics_world.js';
+import { InputManager } from './input_manager.js';
+import { VisualEffects } from './effects.js';
+import { MechaController } from './mecha_controller.js';
 
 /**
  * VEDHARPAN Phase 2: Three.js Viewport & Shadow Physics Engine
@@ -64,6 +68,16 @@ class DioramaScene {
         this.previousMousePosition = { x: 0, y: 0 };
         this.orbitYaw = 0;
         this.orbitPitch = 0;
+
+        // Physics and Logic
+        this.physicsWorld = null;
+        this.inputManager = null;
+        this.effects = null;
+        this.mechaController = null;
+        
+        // Game State
+        this.score = 0;
+        this.lastTime = performance.now();
 
         // Boot system
         this.init();
@@ -144,7 +158,14 @@ class DioramaScene {
         // 8. Connect to WebSocket Telemetry Server
         this.connectTelemetry();
 
-        // 9. Start Rendering Loop
+        // 9. Initialize Systems
+        this.physicsWorld = new PhysicsWorld();
+        this.physicsWorld.addStairColliders(); // Rough collision for the environment
+        
+        this.inputManager = new InputManager(this.camera, this.renderer.domElement);
+        this.effects = new VisualEffects(this.scene);
+
+        // 10. Start Rendering Loop
         this.animate();
     }
 
@@ -309,15 +330,23 @@ class DioramaScene {
             `${assetPath}mecha.glb`,
             (gltf) => {
                 this.mechaModel = gltf.scene;
-                // Position on the bottom of the stairs (Z=0). Y=1.5 prevents clipping into the floor.
-                // The mecha natively faces the camera (+Z).
-                // We rotate it 180 degrees (Math.PI) on Y to make it face -Z (up the stairs).
-                this.mechaModel.position.set(0, 300, 2);
+                // Position on the bottom of the stairs (Z=0).
+                this.mechaModel.position.set(0, 5, 2);
                 this.mechaModel.rotation.set(0, Math.PI, 0);
                 this.mechaModel.scale.set(0.6, 0.6, 0.6);
                 configureShadows(this.mechaModel, true, true);
                 this.scene.add(this.mechaModel);
                 console.log('Loaded: Centerpiece Mecha');
+                
+                // Initialize controller
+                this.mechaController = new MechaController(
+                    this.scene,
+                    this.physicsWorld,
+                    this.camera,
+                    this.mechaModel,
+                    this.effects,
+                    (pos, dir) => this.spawnProjectile(pos, dir)
+                );
             },
             undefined,
             (error) => console.error('Error loading Mecha Model:', error)
@@ -382,6 +411,9 @@ class DioramaScene {
                     tireClone.scale.set(0.4, 0.4, 0.4);
                     configureShadows(tireClone, true, true);
                     this.scene.add(tireClone);
+                    
+                    // Add to physics
+                    this.physicsWorld.addDynamicBody(tireClone, 20, 'cylinder', 0.4);
                 });
 
                 console.log('Loaded: Tires scattered around Mecha');
@@ -419,6 +451,18 @@ class DioramaScene {
                 if (data.hands) {
                     this.latestHands = data.hands;
                     this.hudHand.textContent = `${data.hands.length} detected`;
+                    
+                    if (this.inputManager && data.hands.length > 0) {
+                        const hand = data.hands[0];
+                        const gestures = hand.gesture ? [hand.gesture] : [];
+                        
+                        // Map hand center to world space aim target (e.g., Z=-10)
+                        const hx = THREE.MathUtils.mapLinear(hand.center.x, -1.0, 1.0, OCCLUDER_MIN_X, OCCLUDER_MAX_X);
+                        const hy = THREE.MathUtils.mapLinear(hand.center.y, -1.0, 1.0, OCCLUDER_MIN_Y, OCCLUDER_MAX_Y);
+                        const targetPos = new THREE.Vector3(hx, hy, -10);
+                        
+                        this.inputManager.updateGestures(gestures, targetPos);
+                    }
                 }
             } catch (err) {
                 console.error('Failed to parse telemetry payload:', err);
@@ -590,24 +634,77 @@ class DioramaScene {
         }
     }
 
+    spawnProjectile(position, direction) {
+        const geo = new THREE.SphereGeometry(0.2, 8, 8);
+        const mat = new THREE.MeshBasicMaterial({ color: 0x00ffff });
+        const mesh = new THREE.Mesh(geo, mat);
+        mesh.position.copy(position);
+        this.scene.add(mesh);
+        
+        const body = this.physicsWorld.addDynamicBody(mesh, 1, 'sphere', 0.2);
+        const speed = 20;
+        body.velocity.set(direction.x * speed, direction.y * speed, direction.z * speed);
+        
+        // Auto remove
+        setTimeout(() => {
+            if (mesh.parent) {
+                this.scene.remove(mesh);
+                // Body removed in step() when mesh.parent is null
+            }
+        }, 3000);
+        
+        // Simple collision explosion
+        body.addEventListener("collide", (e) => {
+            if (mesh.parent) {
+                this.effects.createExplosion(mesh.position);
+                this.scene.remove(mesh);
+                this.score += 10;
+                document.getElementById('score').textContent = this.score;
+            }
+        });
+    }
+
     /**
      * Main Animation & Render loop. Runs at browser vertical refresh rate.
      */
     animate() {
         requestAnimationFrame(() => this.animate());
 
+        const now = performance.now();
+        const dt = (now - this.lastTime) / 1000;
+        this.lastTime = now;
+
         // 1. Update camera parallax projections
         this.applyParallax();
+        
+        // Override camera if hand gesture aiming
+        if (this.inputManager && this.inputManager.gestureAimActive) {
+            if (this.handRigs.length > 0) {
+                // Find primary hand rig center
+                const rig = this.handRigs[0];
+                const palmPos = rig.palm.position;
+                if (palmPos.y > -5) {
+                    // Hand is visible, shift camera behind it
+                    const targetCamPos = new THREE.Vector3(palmPos.x, palmPos.y + 0.5, palmPos.z + 2);
+                    this.camera.position.lerp(targetCamPos, 0.1);
+                    this.camera.lookAt(palmPos.x, palmPos.y, palmPos.z - 10);
+                }
+            }
+        }
 
         // 2. Adjust dynamic shadow physics occluder positions
         this.applyShadowOcclusion();
 
-        // 3. Idle animations on models if loaded
-        if (this.mechaModel) {
-            // Subtle breathing/floating effect
-            const elapsed = performance.now() * 0.0015;
-            this.mechaModel.position.y = 0.1 + Math.sin(elapsed) * 0.08;
+        // 3. Update Physics and Logic
+        if (this.physicsWorld) this.physicsWorld.step(dt);
+        if (this.inputManager) {
+            // Provide collidable meshes for mouse raycasting
+            const interactables = [];
+            if (this.roomModel) interactables.push(this.roomModel);
+            this.inputManager.update(interactables);
         }
+        if (this.mechaController) this.mechaController.update(this.inputManager, dt);
+        if (this.effects) this.effects.update(dt);
 
         // 4. Render main loop frame
         this.renderer.render(this.scene, this.camera);

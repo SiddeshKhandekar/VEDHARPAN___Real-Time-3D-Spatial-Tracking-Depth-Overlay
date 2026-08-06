@@ -11,7 +11,8 @@
         {
             "imports": {
                 "three": "https://unpkg.com/three@0.165.0/build/three.module.js",
-                "three/addons/": "https://unpkg.com/three@0.165.0/examples/jsm/"
+                "three/addons/": "https://unpkg.com/three@0.165.0/examples/jsm/",
+                "cannon-es": "https://unpkg.com/cannon-es@0.20.0/dist/cannon-es.js"
             }
         }
     </script>
@@ -28,6 +29,16 @@
         <div class="hud-item">Hands: <span id="hands-coords">0 detected</span></div>
         <button id="disconnect-btn" class="hud-item disconnect-btn">Disconnect & Close</button>
     </div>
+
+    <!-- Game HUD -->
+    <div id="game-hud">
+        <div class="game-hud-item">❤️ <span id="health">100</span></div>
+        <div class="game-hud-item">🔫 <span id="ammo">∞</span></div>
+        <div class="game-hud-item">🏆 <span id="score">0</span></div>
+    </div>
+    
+    <!-- Crosshair -->
+    <div id="crosshair"></div>
 
     <!-- Main Scene script -->
     <script type="module" src="scene.js"></script>
