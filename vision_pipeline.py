@@ -671,12 +671,11 @@ class VisionPipeline:
         hand_results,
         frame_width:  int,
         frame_height: int,
-            frame_width:  Pixel width of the current frame.
-            frame_height: Pixel height of the current frame.
+    ) -> List[Tuple[SpatialVector, List[Dict[str, float]], str]]:
+        """Extract raw (un-smoothed) hand vectors, landmarks, and gestures.
 
         Returns:
-            A list of tuples (SpatialVector, List[Dict]) where the list contains
-            exactly 21 dicts each with keys 'x', 'y', 'z' in [-1.0, 1.0].
+            A list of tuples (SpatialVector, List[Dict], str) containing center, landmarks, and gesture.
         """
         if not hand_results.multi_hand_landmarks:
             return []
@@ -712,6 +711,7 @@ class VisionPipeline:
                     "z": round(lm_norm_z, 5),
                 })
             
-            hands_data.append((SpatialVector(x=norm_x, y=norm_y, z=norm_z), all_landmarks))
+            gesture = self._classify_gesture(hand_landmarks.landmark)
+            hands_data.append((SpatialVector(x=norm_x, y=norm_y, z=norm_z), all_landmarks, gesture))
 
         return hands_data
