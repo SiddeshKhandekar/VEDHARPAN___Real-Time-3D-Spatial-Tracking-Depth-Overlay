@@ -1,5 +1,9 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { PhysicsWorld } from './physics_world.js';
+import { InputManager } from './input_manager.js';
+import { VisualEffects } from './effects.js';
+import { MechaController } from './mecha_controller.js';
 
 /**
  * VEDHARPAN Phase 2: Three.js Viewport & Shadow Physics Engine
@@ -64,6 +68,16 @@ class DioramaScene {
         this.previousMousePosition = { x: 0, y: 0 };
         this.orbitYaw = 0;
         this.orbitPitch = 0;
+
+        // Physics and Logic
+        this.physicsWorld = null;
+        this.inputManager = null;
+        this.effects = null;
+        this.mechaController = null;
+        
+        // Game State
+        this.score = 0;
+        this.lastTime = performance.now();
 
         // Boot system
         this.init();
