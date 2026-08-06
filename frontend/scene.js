@@ -204,19 +204,28 @@ class DioramaScene {
             metalness: 0.0,
         });
 
-        const jointGeo = new THREE.SphereGeometry(0.12, 10, 10);
+        const jointGeo = new THREE.SphereGeometry(0.22, 10, 10);
         
         // Cylinder geometry for bones.
-        const boneGeo = new THREE.CylinderGeometry(0.12, 0.12, 1, 8);
+        const boneGeo = new THREE.CylinderGeometry(0.22, 0.22, 1, 8);
         boneGeo.translate(0, 0.5, 0); // Translate so origin is at one end
 
         this.handConnections = [
-            [0, 1], [1, 2], [2, 3], [3, 4],
-            [0, 5], [5, 6], [6, 7], [7, 8],
-            [5, 9], [9, 10], [10, 11], [11, 12],
-            [9, 13], [13, 14], [14, 15], [15, 16],
-            [13, 17], [17, 18], [18, 19], [19, 20],
-            [0, 17]
+            // Thumb
+            [1, 2], [2, 3], [3, 4],
+            // Index
+            [5, 6], [6, 7], [7, 8],
+            // Middle
+            [9, 10], [10, 11], [11, 12],
+            // Ring
+            [13, 14], [14, 15], [15, 16],
+            // Pinky
+            [17, 18], [18, 19], [19, 20],
+            
+            // Palm Solid Fill
+            [0, 1], [0, 5], [0, 9], [0, 13], [0, 17], // wrist to knuckles
+            [1, 5], [5, 9], [9, 13], [13, 17],        // horizontal knuckle webbing
+            [1, 17], [5, 17], [9, 17]                 // cross-palm fill
         ];
 
         for (let h = 0; h < 2; h++) {
