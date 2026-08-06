@@ -35,14 +35,14 @@ class DioramaScene {
         this.hudStatus = document.getElementById('status');
         this.hudFps = document.getElementById('fps');
         this.hudHead = document.getElementById('head-coords');
-        this.hudHand = document.getElementById('hand-coords');
+        this.hudHand = document.getElementById('hands-coords');
 
         // Main scene objects
         this.scene = null;
         this.camera = null;
         this.renderer = null;
         this.dirLight = null;
-        this.handOccluder = null;
+        this.handRigs = [];
 
         // Assets
         this.roomModel = null;
@@ -51,11 +51,9 @@ class DioramaScene {
 
         // Telemetry state
         this.latestHead = { x: 0, y: 0, z: 0 };
-        this.latestHand = { x: 0, y: 0, z: 0 };
-        this.latestHandLandmarks = [];
+        this.latestHands = [];
         this.socket = null;
         this.reconnectAttempt = 0;
-        this.handRigSpheres = [];
 
         // Performance metrics
         this.frameCount = 0;
@@ -102,7 +100,7 @@ class DioramaScene {
         this.setupLights();
 
         // 5. Create Dynamic Hand Shadow Occluder Mesh
-        this.createHandOccluder();
+        this.createHandRigs();
 
         // 6. Load Assets
         this.loadAssets();
@@ -194,9 +192,8 @@ class DioramaScene {
      * transparent:true. The mesh is optically invisible to the viewer but
      * the renderer still writes it into the shadow depth pass.
      */
-    createHandOccluder() {
-        this.handRigGroup = new THREE.Group();
-        this.handRigSpheres = [];
+    createHandRigs() {
+        this.handRigs = [];
 
         // Shadow-only material: optically invisible, but rendered into shadow maps
         const shadowOnlyMat = new THREE.MeshStandardMaterial({
@@ -207,27 +204,55 @@ class DioramaScene {
             metalness: 0.0,
         });
 
-        const jointGeo = new THREE.SphereGeometry(0.15, 10, 10);
+        const jointGeo = new THREE.SphereGeometry(0.12, 10, 10);
+        
+        // Cylinder geometry for bones.
+        const boneGeo = new THREE.CylinderGeometry(0.12, 0.12, 1, 8);
+        boneGeo.translate(0, 0.5, 0); // Translate so origin is at one end
 
-        // 21 MediaPipe hand landmarks
-        for (let i = 0; i < 21; i++) {
-            const sphere = new THREE.Mesh(jointGeo, shadowOnlyMat);
-            sphere.castShadow = true;
-            sphere.receiveShadow = false;
-            sphere.position.set(0, -10, 0); // Start out-of-frame
-            this.handRigGroup.add(sphere);
-            this.handRigSpheres.push(sphere);
+        this.handConnections = [
+            [0, 1], [1, 2], [2, 3], [3, 4],
+            [0, 5], [5, 6], [6, 7], [7, 8],
+            [5, 9], [9, 10], [10, 11], [11, 12],
+            [9, 13], [13, 14], [14, 15], [15, 16],
+            [13, 17], [17, 18], [18, 19], [19, 20],
+            [0, 17]
+        ];
+
+        for (let h = 0; h < 2; h++) {
+            const rigGroup = new THREE.Group();
+            const spheres = [];
+            const bones = [];
+            
+            for (let i = 0; i < 21; i++) {
+                const sphere = new THREE.Mesh(jointGeo, shadowOnlyMat);
+                sphere.castShadow = true;
+                sphere.receiveShadow = false;
+                sphere.position.set(0, -10, 0); // Start out-of-frame
+                rigGroup.add(sphere);
+                spheres.push(sphere);
+            }
+            
+            for (let i = 0; i < this.handConnections.length; i++) {
+                const bone = new THREE.Mesh(boneGeo, shadowOnlyMat);
+                bone.castShadow = true;
+                bone.receiveShadow = false;
+                bone.position.set(0, -10, 0);
+                rigGroup.add(bone);
+                bones.push(bone);
+            }
+            
+            // Central palm volume proxy (slightly larger)
+            const palmGeo = new THREE.SphereGeometry(0.2, 10, 10);
+            const palm = new THREE.Mesh(palmGeo, shadowOnlyMat);
+            palm.castShadow = true;
+            palm.receiveShadow = false;
+            palm.position.set(0, -10, 0);
+            rigGroup.add(palm);
+
+            this.scene.add(rigGroup);
+            this.handRigs.push({ group: rigGroup, spheres, bones, palm });
         }
-
-        // Central palm volume proxy (slightly larger)
-        const palmGeo = new THREE.SphereGeometry(0.28, 12, 12);
-        this.handOccluder = new THREE.Mesh(palmGeo, shadowOnlyMat);
-        this.handOccluder.castShadow = true;
-        this.handOccluder.receiveShadow = false;
-        this.handOccluder.position.set(0, -10, 2.0);
-        this.handRigGroup.add(this.handOccluder);
-
-        this.scene.add(this.handRigGroup);
     }
 
     /**
@@ -382,13 +407,9 @@ class DioramaScene {
                     this.hudHead.textContent = `x: ${data.head.x.toFixed(2)}, y: ${data.head.y.toFixed(2)}, z: ${data.head.z.toFixed(2)}`;
                 }
 
-                if (data.hand) {
-                    this.latestHand = data.hand;
-                    this.hudHand.textContent = `x: ${data.hand.x.toFixed(2)}, y: ${data.hand.y.toFixed(2)}, z: ${data.hand.z.toFixed(2)}`;
-                }
-
-                if (data.hand_landmarks) {
-                    this.latestHandLandmarks = data.hand_landmarks;
+                if (data.hands) {
+                    this.latestHands = data.hands;
+                    this.hudHand.textContent = `${data.hands.length} detected`;
                 }
             } catch (err) {
                 console.error('Failed to parse telemetry payload:', err);
@@ -483,42 +504,63 @@ class DioramaScene {
      * Process Hand coordinates and relocate the 21-joint skeleton occluder.
      */
     applyShadowOcclusion() {
-        // Map normalized telemetry [-1.0, 1.0] to custom Three.js world boundaries
-        const targetX = THREE.MathUtils.mapLinear(this.latestHand.x, -1.0, 1.0, OCCLUDER_MIN_X, OCCLUDER_MAX_X);
-        const targetY = THREE.MathUtils.mapLinear(this.latestHand.y, -1.0, 1.0, OCCLUDER_MIN_Y, OCCLUDER_MAX_Y);
-        const targetZ = THREE.MathUtils.mapLinear(this.latestHand.z, -1.0, 1.0, OCCLUDER_MIN_Z, OCCLUDER_MAX_Z);
+        const up = new THREE.Vector3(0, 1, 0);
 
-        const isHandDetected = Math.abs(this.latestHand.x) > 0.001 || Math.abs(this.latestHand.y) > 0.001;
+        for (let h = 0; h < 2; h++) {
+            const rig = this.handRigs[h];
+            const handData = (this.latestHands && h < this.latestHands.length) ? this.latestHands[h] : null;
 
-        if (isHandDetected) {
-            // Smoothly move hand occluder center towards wrist coordinate target
-            this.handOccluder.position.x += (targetX - this.handOccluder.position.x) * 0.25;
-            this.handOccluder.position.y += (targetY - this.handOccluder.position.y) * 0.25;
-            this.handOccluder.position.z += (targetZ - this.handOccluder.position.z) * 0.25;
-
-            // Position all 21 individual joint spheres if landmarks array is available
-            if (this.latestHandLandmarks && this.latestHandLandmarks.length === 21) {
+            if (handData && handData.landmarks && handData.landmarks.length === 21) {
+                // Position all 21 individual joint spheres
                 for (let i = 0; i < 21; i++) {
-                    const lm = this.latestHandLandmarks[i];
+                    const lm = handData.landmarks[i];
                     const lmX = THREE.MathUtils.mapLinear(lm.x, -1.0, 1.0, OCCLUDER_MIN_X, OCCLUDER_MAX_X);
                     const lmY = THREE.MathUtils.mapLinear(lm.y, -1.0, 1.0, OCCLUDER_MIN_Y, OCCLUDER_MAX_Y);
                     const lmZ = THREE.MathUtils.mapLinear(lm.z, -1.0, 1.0, OCCLUDER_MIN_Z, OCCLUDER_MAX_Z);
 
-                    const sphere = this.handRigSpheres[i];
+                    const sphere = rig.spheres[i];
                     sphere.position.x += (lmX - sphere.position.x) * 0.35;
                     sphere.position.y += (lmY - sphere.position.y) * 0.35;
                     sphere.position.z += (lmZ - sphere.position.z) * 0.35;
                 }
-            }
-        } else {
-            // Smoothly return all occluders out of frame when no hand detected
-            this.handOccluder.position.x += (0.0 - this.handOccluder.position.x) * 0.1;
-            this.handOccluder.position.y += (-10.0 - this.handOccluder.position.y) * 0.1;
-            this.handOccluder.position.z += (2.0 - this.handOccluder.position.z) * 0.1;
+                
+                // Update bones based on spheres positions
+                for (let i = 0; i < this.handConnections.length; i++) {
+                    const [idxA, idxB] = this.handConnections[i];
+                    const posA = rig.spheres[idxA].position;
+                    const posB = rig.spheres[idxB].position;
+                    
+                    const bone = rig.bones[i];
+                    const distance = posA.distanceTo(posB);
+                    if (distance > 0.001) {
+                        bone.position.copy(posA);
+                        bone.scale.set(1, distance, 1);
+                        
+                        const dir = new THREE.Vector3().subVectors(posB, posA).normalize();
+                        bone.quaternion.setFromUnitVectors(up, dir);
+                    }
+                }
+                
+                // Update palm position (average of key points)
+                const palmIndices = [0, 5, 9, 13, 17];
+                const palmCenter = new THREE.Vector3();
+                for (const idx of palmIndices) {
+                    palmCenter.add(rig.spheres[idx].position);
+                }
+                palmCenter.divideScalar(palmIndices.length);
+                rig.palm.position.copy(palmCenter);
 
-            for (let i = 0; i < this.handRigSpheres.length; i++) {
-                const sphere = this.handRigSpheres[i];
-                sphere.position.y += (-10.0 - sphere.position.y) * 0.1;
+            } else {
+                // Smoothly return all occluders out of frame when no hand detected
+                for (let i = 0; i < rig.spheres.length; i++) {
+                    const sphere = rig.spheres[i];
+                    sphere.position.y += (-10.0 - sphere.position.y) * 0.1;
+                }
+                for (let i = 0; i < rig.bones.length; i++) {
+                    const bone = rig.bones[i];
+                    bone.position.y += (-10.0 - bone.position.y) * 0.1;
+                }
+                rig.palm.position.y += (-10.0 - rig.palm.position.y) * 0.1;
             }
         }
     }

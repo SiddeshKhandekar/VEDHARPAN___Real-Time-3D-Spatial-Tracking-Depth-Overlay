@@ -18,7 +18,12 @@ Responsibility:
 JSON Payload Schema (broadcast to each connected WebSocket client):
     {
         "head":      { "x": float, "y": float, "z": float },
-        "hand":      { "x": float, "y": float, "z": float },
+        "hands": [
+            {
+                "center": { "x": float, "y": float, "z": float },
+                "landmarks": [ { "x": float, "y": float, "z": float }, ... ]
+            }
+        ],
         "timestamp": float   // Unix epoch seconds
     }
 
@@ -306,12 +311,17 @@ class TelemetryBroker:
                 "y": round(frame.head.y, 6),
                 "z": round(frame.head.z, 6),
             },
-            "hand": {
-                "x": round(frame.hand.x, 6),
-                "y": round(frame.hand.y, 6),
-                "z": round(frame.hand.z, 6),
-            },
-            "hand_landmarks": frame.hand_landmarks,
+            "hands": [
+                {
+                    "center": {
+                        "x": round(h["center"].x, 6),
+                        "y": round(h["center"].y, 6),
+                        "z": round(h["center"].z, 6),
+                    },
+                    "landmarks": h["landmarks"]
+                }
+                for h in frame.hands
+            ],
             "timestamp": round(frame.timestamp, 6),
         }
         return json.dumps(payload, separators=(",", ":"))

@@ -6,9 +6,9 @@ Responsibility:
     MediaPipe models simultaneously on each captured frame:
         1. Face Mesh  → extracts the user's interpupillary midpoint (eye bridge)
                         and computes a normalized (x, y, z) head/parallax vector.
-        2. Hands      → extracts all 21 landmark positions for the dominant hand,
+        2. Hands      → extracts all 21 landmark positions for up to two hands,
                         providing both the wrist anchor (shadow-occluder center)
-                        and the full 21-point skeleton for a hand-shaped shadow rig.
+                        and the full 21-point skeleton for hand-shaped shadow rigs.
 
     All raw landmark coordinates are passed through independent Exponential
     Moving Average (EMA) filters before being placed on the output queue:
@@ -17,7 +17,7 @@ Responsibility:
 
     Normalized output range is [-1.0, 1.0] in all three axes, centred on the
     camera frame. Depth (z) is approximated via interpupillary pixel distance
-    for the head and palm bounding-box diagonal for the hand.
+    for the head and palm bounding-box diagonal for the hands.
 
 Threading Model:
     VisionPipeline runs inside its own daemon thread. It writes telemetry frames
@@ -105,16 +105,16 @@ class TelemetryFrame:
 
     Attributes:
         head:            Smoothed head/eye spatial vector for parallax computation.
-        hand:            Smoothed hand/wrist spatial vector for shadow occlusion center.
-        hand_landmarks:  All 21 normalized hand landmark points for building a
-                         hand-shaped shadow rig in the frontend. Each entry is a
-                         dict with keys 'x', 'y', 'z' in the range [-1.0, 1.0].
-                         Empty list when no hand is detected.
+        hands:           List of dictionaries, each containing:
+                         - 'center': Smoothed hand/wrist spatial vector.
+                         - 'landmarks': 21 normalized hand landmark points for building a
+                           hand-shaped shadow rig. Each entry is a dict with keys 'x', 'y', 'z'
+                           in the range [-1.0, 1.0].
+                         Empty list when no hands are detected.
         timestamp:       Unix epoch seconds at the moment of capture.
     """
     head:            SpatialVector            = field(default_factory=SpatialVector)
-    hand:            SpatialVector            = field(default_factory=SpatialVector)
-    hand_landmarks:  List[Dict[str, float]]   = field(default_factory=list)
+    hands:           List[Dict]               = field(default_factory=list)
     timestamp:       float                    = field(default_factory=time.time)
 
 
@@ -343,10 +343,13 @@ class VisionPipeline:
             daemon     = True,
         )
 
-        # EMA filters — separate instances for head and hand to allow
+        # EMA filters — separate instances for head and two hands to allow
         # independent alpha coefficients.
         self._head_ema = VectorEMAFilter(alpha=EMA_ALPHA_HEAD)
-        self._hand_ema = VectorEMAFilter(alpha=EMA_ALPHA_HAND)
+        self._hand_emas = [
+            VectorEMAFilter(alpha=EMA_ALPHA_HAND),
+            VectorEMAFilter(alpha=EMA_ALPHA_HAND)
+        ]
 
         # MediaPipe solution handles (initialised inside the worker thread
         # so that CUDA context is bound to the correct thread).
@@ -404,7 +407,7 @@ class VisionPipeline:
         )
 
         self._hands = mp_hands.Hands(
-            max_num_hands            = 1,
+            max_num_hands            = 2,
             min_detection_confidence = 0.7,
             min_tracking_confidence  = 0.6,
         )
@@ -527,19 +530,30 @@ class VisionPipeline:
             raw_head = self._extract_head_vector(
                 face_results, frame_width, frame_height
             )
-            raw_hand, raw_landmarks = self._extract_hand_vector(
+            extracted_hands = self._extract_hands(
                 hand_results, frame_width, frame_height
             )
 
             # --- Apply EMA smoothing ---
             smooth_head = self._head_ema.update(raw_head)
-            smooth_hand = self._hand_ema.update(raw_hand)
+            
+            smooth_hands = []
+            for i, (raw_hand_center, raw_landmarks) in enumerate(extracted_hands):
+                if i < len(self._hand_emas):
+                    smooth_center = self._hand_emas[i].update(raw_hand_center)
+                    smooth_hands.append({
+                        "center": smooth_center,
+                        "landmarks": raw_landmarks
+                    })
+            
+            # Reset unused EMAs
+            for i in range(len(extracted_hands), len(self._hand_emas)):
+                self._hand_emas[i].reset()
 
             # --- Build and enqueue the telemetry frame ---
             telemetry = TelemetryFrame(
                 head           = smooth_head,
-                hand           = smooth_hand,
-                hand_landmarks = raw_landmarks,  # Raw: EMA on 21 pts is too costly
+                hands          = smooth_hands,
                 timestamp      = time.time(),
             )
 
@@ -615,21 +629,16 @@ class VisionPipeline:
 
         return SpatialVector(x=norm_x, y=norm_y, z=norm_z)
 
-    def _extract_hand_vector(
+    def _extract_hands(
         self,
         hand_results,
         frame_width:  int,
         frame_height: int,
-    ) -> Tuple[SpatialVector, List[Dict[str, float]]]:
-        """Extract a raw (un-smoothed) hand vector and all 21 landmark positions.
+    ) -> List[Tuple[SpatialVector, List[Dict[str, float]]]]:
+        """Extract raw (un-smoothed) hand vectors and landmark positions for up to two hands.
 
-        Returns both the wrist-anchored center-of-mass vector (for EMA smoothing
-        and the occluder center) and a full 21-point landmark list (for building
-        a hand-shaped occluder rig in the Three.js frontend).
-
-        If no hand is detected, resets the EMA filter and returns the origin
-        vector and an empty landmark list, so the occluder gently returns to
-        a neutral resting position.
+        Returns a list of tuples, each containing the wrist-anchored center-of-mass vector
+        and a full 21-point landmark list.
 
         Args:
             hand_results: The output of self._hands.process().
@@ -637,45 +646,43 @@ class VisionPipeline:
             frame_height: Pixel height of the current frame.
 
         Returns:
-            A tuple of (SpatialVector, List[Dict]) where the list contains
-            exactly 21 dicts each with keys 'x', 'y', 'z' in [-1.0, 1.0],
-            or an empty list when no hand is detected.
+            A list of tuples (SpatialVector, List[Dict]) where the list contains
+            exactly 21 dicts each with keys 'x', 'y', 'z' in [-1.0, 1.0].
         """
         if not hand_results.multi_hand_landmarks:
-            self._hand_ema.reset()
-            return SpatialVector(0.0, 0.0, 0.0), []
+            return []
 
-        hand_landmarks = hand_results.multi_hand_landmarks[0]
-        wrist          = hand_landmarks.landmark[WRIST_LANDMARK_IDX]
+        hands_data = []
+        for hand_landmarks in hand_results.multi_hand_landmarks:
+            wrist = hand_landmarks.landmark[WRIST_LANDMARK_IDX]
 
-        wrist_pixel_x = wrist.x * frame_width
-        wrist_pixel_y = wrist.y * frame_height
+            wrist_pixel_x = wrist.x * frame_width
+            wrist_pixel_y = wrist.y * frame_height
 
-        norm_x, norm_y = _normalise_pixel(
-            wrist_pixel_x, wrist_pixel_y, frame_width, frame_height
-        )
-        norm_z = _estimate_hand_depth(hand_landmarks, frame_width, frame_height)
-
-        # Collect all 21 normalised landmark points for the frontend rig.
-        # MediaPipe z is relative depth in the palm plane; we remap it to [-1, 1].
-        all_landmarks: List[Dict[str, float]] = []
-        for lm in hand_landmarks.landmark:
-            # Invert the X coordinate to fix the hand mirror/chirality issue
-            mirrored_pixel_x = (1.0 - lm.x) * frame_width  # <--- Mirrors the X axis
-            
-            lm_norm_x, lm_norm_y = _normalise_pixel(
-                mirrored_pixel_x,                          # <--- Pass the mirrored X here
-                lm.y * frame_height,
-                frame_width,
-                frame_height,
+            norm_x, norm_y = _normalise_pixel(
+                wrist_pixel_x, wrist_pixel_y, frame_width, frame_height
             )
-            # MediaPipe hand z is already relative to wrist in a normalised range;
-            # clamp it to [-1, 1] for wire consistency.
-            lm_norm_z = float(np.clip(lm.z * 5.0, -1.0, 1.0))
-            all_landmarks.append({
-                "x": round(lm_norm_x, 5),
-                "y": round(lm_norm_y, 5),
-                "z": round(lm_norm_z, 5),
-            })
+            norm_z = _estimate_hand_depth(hand_landmarks, frame_width, frame_height)
 
-        return SpatialVector(x=norm_x, y=norm_y, z=norm_z), all_landmarks
+            # Collect all 21 normalised landmark points for the frontend rig.
+            all_landmarks: List[Dict[str, float]] = []
+            for lm in hand_landmarks.landmark:
+                # Invert the X coordinate to fix the hand mirror/chirality issue
+                mirrored_pixel_x = (1.0 - lm.x) * frame_width
+                
+                lm_norm_x, lm_norm_y = _normalise_pixel(
+                    mirrored_pixel_x,
+                    lm.y * frame_height,
+                    frame_width,
+                    frame_height,
+                )
+                lm_norm_z = float(np.clip(lm.z * 5.0, -1.0, 1.0))
+                all_landmarks.append({
+                    "x": round(lm_norm_x, 5),
+                    "y": round(lm_norm_y, 5),
+                    "z": round(lm_norm_z, 5),
+                })
+            
+            hands_data.append((SpatialVector(x=norm_x, y=norm_y, z=norm_z), all_landmarks))
+
+        return hands_data
