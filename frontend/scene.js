@@ -160,7 +160,6 @@ class DioramaScene {
 
         // 9. Initialize Systems
         this.physicsWorld = new PhysicsWorld();
-        this.physicsWorld.addStairColliders(); // Rough collision for the environment
         
         this.inputManager = new InputManager(this.camera, this.renderer.domElement);
         this.effects = new VisualEffects(this.scene);
@@ -317,6 +316,14 @@ class DioramaScene {
                 this.roomModel.position.set(0, -2.7, 0);
                 this.roomModel.rotation.set(0, 1.6, 0);
                 this.roomModel.scale.set(1.2, 1.2, 1.2);
+                
+                this.roomModel.updateMatrixWorld(true);
+                this.roomModel.traverse((child) => {
+                    if (child.isMesh) {
+                        this.physicsWorld.addStaticTrimesh(child);
+                    }
+                });
+
                 configureShadows(this.roomModel, false, true); // Room only receives shadows
                 this.scene.add(this.roomModel);
                 console.log('Loaded: Room Environment');
