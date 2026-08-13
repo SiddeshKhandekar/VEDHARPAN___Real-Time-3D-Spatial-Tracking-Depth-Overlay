@@ -21,16 +21,80 @@ export class PhysicsWorld {
     }
 
     /**
-     * Add a static plane (e.g., ground)
+     * Add a static Trimesh from a Three.js Mesh.
+     * This is used for complex static environment geometry (walls, floors, stairs).
      */
-    addStaticPlane() {
-        const shape = new CANNON.Plane();
-        const body = new CANNON.Body({ mass: 0, material: this.defaultMaterial });
-        body.addShape(shape);
-        // Plane in Cannon is facing Z, rotate to face Y
-        body.quaternion.setFromAxisAngle(new CANNON.Vec3(1, 0, 0), -Math.PI / 2);
-        this.world.addBody(body);
-        return body;
+    addStaticTrimesh(mesh) {
+        if (!mesh.geometry || !mesh.geometry.attributes.position) {
+            console.warn('Mesh does not have valid geometry for Trimesh physics', mesh);
+            return;
+        }
+
+        const geometry = mesh.geometry;
+        
+        // Cannon.js Trimesh needs an array of vertices and indices
+        let vertices;
+        if (geometry.attributes.position.array instanceof Float32Array) {
+            vertices = Array.from(geometry.attributes.position.array);
+        } else {
+            vertices = geometry.attributes.position.array;
+        }
+
+        let indices;
+        if (geometry.index) {
+            if (geometry.index.array instanceof Uint16Array || geometry.index.array instanceof Uint32Array) {
+                indices = Array.from(geometry.index.array);
+            } else {
+                indices = geometry.index.array;
+            }
+        } else {
+            // Generate non-indexed indices if no index buffer exists
+            indices = [];
+            for (let i = 0; i < vertices.length / 3; i++) {
+                indices.push(i);
+            }
+        }
+
+        // The Trimesh uses the vertices and indices to build the collision surface
+        const trimeshShape = new CANNON.Trimesh(vertices, indices);
+
+        const body = new CANNON.Body({
+            mass: 0, // static body
+            material: this.defaultMaterial
+        });
+        
+        body.addShape(trimeshShape);
+
+        // Position, rotate, and scale based on world matrix
+        const worldPos = new THREE.Vector3();
+        const worldQuat = new THREE.Quaternion();
+        const worldScale = new THREE.Vector3();
+        mesh.getWorldPosition(worldPos);
+        mesh.getWorldQuaternion(worldQuat);
+        mesh.getWorldScale(worldScale);
+
+        // Apply scale to the vertices of the shape itself by scaling the body shape
+        // Wait, CANNON.Trimesh does not have a setScale directly on the instance, it scales via the constructor or by scaling the vertices before passing them.
+        // Let's scale vertices before creating the Trimesh shape instead!
+        
+        const scaledVertices = [];
+        for (let i = 0; i < vertices.length; i += 3) {
+            scaledVertices.push(vertices[i] * worldScale.x);
+            scaledVertices.push(vertices[i + 1] * worldScale.y);
+            scaledVertices.push(vertices[i + 2] * worldScale.z);
+        }
+        
+        const scaledTrimeshShape = new CANNON.Trimesh(scaledVertices, indices);
+        const scaledBody = new CANNON.Body({
+            mass: 0,
+            material: this.defaultMaterial,
+            position: new CANNON.Vec3(worldPos.x, worldPos.y, worldPos.z),
+            quaternion: new CANNON.Quaternion(worldQuat.x, worldQuat.y, worldQuat.z, worldQuat.w)
+        });
+        scaledBody.addShape(scaledTrimeshShape);
+
+        this.world.addBody(scaledBody);
+        return scaledBody;
     }
 
     /**
@@ -63,18 +127,7 @@ export class PhysicsWorld {
         return body;
     }
     
-    /**
-     * Add static boxes to approximate stairs
-     */
-    addStairColliders() {
-        const rampShape = new CANNON.Box(new CANNON.Vec3(3, 0.2, 3));
-        const rampBody = new CANNON.Body({ mass: 0 });
-        rampBody.addShape(rampShape);
-        rampBody.position.set(0, 0.5, 2);
-        // Angle the ramp
-        rampBody.quaternion.setFromAxisAngle(new CANNON.Vec3(1, 0, 0), -Math.PI / 8);
-        this.world.addBody(rampBody);
-    }
+
 
     step(dt) {
         // Step physics

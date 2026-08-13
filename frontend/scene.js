@@ -160,7 +160,6 @@ class DioramaScene {
 
         // 9. Initialize Systems
         this.physicsWorld = new PhysicsWorld();
-        this.physicsWorld.addStairColliders(); // Rough collision for the environment
         
         this.inputManager = new InputManager(this.camera, this.renderer.domElement);
         this.effects = new VisualEffects(this.scene);
@@ -317,39 +316,47 @@ class DioramaScene {
                 this.roomModel.position.set(0, -2.7, 0);
                 this.roomModel.rotation.set(0, 1.6, 0);
                 this.roomModel.scale.set(1.2, 1.2, 1.2);
+                
+                this.roomModel.updateMatrixWorld(true);
+                this.roomModel.traverse((child) => {
+                    if (child.isMesh) {
+                        this.physicsWorld.addStaticTrimesh(child);
+                    }
+                });
+
                 configureShadows(this.roomModel, false, true); // Room only receives shadows
                 this.scene.add(this.roomModel);
                 console.log('Loaded: Room Environment');
-            },
-            undefined,
-            (error) => console.error('Error loading Room Model:', error)
-        );
 
-        // 2. Load Mecha — placed on the stairs
-        loader.load(
-            `${assetPath}mecha.glb`,
-            (gltf) => {
-                this.mechaModel = gltf.scene;
-                // Position on the bottom of the stairs (Z=0).
-                this.mechaModel.position.set(0, 5, 2);
-                this.mechaModel.rotation.set(0, Math.PI, 0);
-                this.mechaModel.scale.set(0.6, 0.6, 0.6);
-                configureShadows(this.mechaModel, true, true);
-                this.scene.add(this.mechaModel);
-                console.log('Loaded: Centerpiece Mecha');
-                
-                // Initialize controller
-                this.mechaController = new MechaController(
-                    this.scene,
-                    this.physicsWorld,
-                    this.camera,
-                    this.mechaModel,
-                    this.effects,
-                    (pos, dir) => this.spawnProjectile(pos, dir)
+                // 2. Load Mecha — placed on the stairs (Moved inside Room load callback to ensure physics trimesh exists first)
+                loader.load(
+                    `${assetPath}mecha.glb`,
+                    (gltf) => {
+                        this.mechaModel = gltf.scene;
+                        // Position on the bottom of the stairs (Z=0).
+                        this.mechaModel.position.set(0, 5, 2);
+                        this.mechaModel.rotation.set(0, Math.PI, 0);
+                        this.mechaModel.scale.set(0.6, 0.6, 0.6);
+                        configureShadows(this.mechaModel, true, true);
+                        this.scene.add(this.mechaModel);
+                        console.log('Loaded: Centerpiece Mecha');
+                        
+                        // Initialize controller
+                        this.mechaController = new MechaController(
+                            this.scene,
+                            this.physicsWorld,
+                            this.camera,
+                            this.mechaModel,
+                            this.effects,
+                            (pos, dir) => this.spawnProjectile(pos, dir)
+                        );
+                    },
+                    undefined,
+                    (error) => console.error('Error loading Mecha Model:', error)
                 );
             },
             undefined,
-            (error) => console.error('Error loading Mecha Model:', error)
+            (error) => console.error('Error loading Room Model:', error)
         );
 
         // 3. Load Space Globe Background
