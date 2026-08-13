@@ -10,12 +10,11 @@ export class MechaController {
         this.muzzleFlash = muzzleFlash;
         this.createProjectile = createProjectile;
         
-        // Physics Body for the mecha (Capsule-like)
+        // Physics Body for the mecha (Capsule-like approximated by a Sphere for robust trimesh collision)
         const radius = 0.5;
-        const height = 1.0;
         this.body = new CANNON.Body({
             mass: 80, // kg
-            shape: new CANNON.Cylinder(radius, radius, height, 16),
+            shape: new CANNON.Sphere(radius),
             position: new CANNON.Vec3(0, 5, 2),
             fixedRotation: true // Prevent falling over
         });
