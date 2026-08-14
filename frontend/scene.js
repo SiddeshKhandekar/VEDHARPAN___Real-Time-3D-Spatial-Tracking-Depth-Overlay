@@ -721,15 +721,8 @@ class DioramaScene {
                     const mechaPos = this.mechaController.mesh.position;
                     const mechaQuat = this.mechaController.body.quaternion;
 
-                    // Offset: behind (in local Z if mecha faces Z) and up
-                    // Because mecha initially points -Z (or rotates towards velocity vector). We can base it purely on its current velocity/orientation.
-                    // Let's use the mecha's forward vector. mecha Model is at rotation Math.PI so its forward is technically +Z in local coordinates before Math.PI rotation. 
-                    // Actually, mechaController sets body quaternion based on velocity.
-                    const forward = new THREE.Vector3(0, 0, 1).applyQuaternion(mechaQuat);
-
-                    // Position camera 6 units behind, 3 units up
-                    const offset = forward.clone().multiplyScalar(6);
-                    offset.y += 3;
+                    // Offset: behind (-Z) and up (+Y)
+                    const offset = new THREE.Vector3(0, 3, -6).applyQuaternion(mechaQuat);
 
                     const targetCamPos = mechaPos.clone().add(offset);
                     this.camera.position.lerp(targetCamPos, 0.1);
@@ -745,14 +738,14 @@ class DioramaScene {
                     const mechaPos = this.mechaController.mesh.position;
                     const mechaQuat = this.mechaController.body.quaternion;
 
-                    // Position at head/cockpit
-                    const headOffset = new THREE.Vector3(0, 1.8, -0.5).applyQuaternion(mechaQuat);
+                    // Position at head/cockpit (slightly forward +Z)
+                    const headOffset = new THREE.Vector3(0, 1.8, 0.5).applyQuaternion(mechaQuat);
                     const targetCamPos = mechaPos.clone().add(headOffset);
 
                     this.camera.position.copy(targetCamPos);
 
-                    // Look forward
-                    const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(mechaQuat);
+                    // Look forward (+Z)
+                    const forward = new THREE.Vector3(0, 0, 1).applyQuaternion(mechaQuat);
                     const lookTarget = targetCamPos.clone().add(forward.multiplyScalar(10));
                     this.camera.lookAt(lookTarget);
                     this.camera.clearViewOffset();
@@ -764,8 +757,8 @@ class DioramaScene {
                     const mechaPos = this.mechaController.mesh.position;
                     const mechaQuat = this.mechaController.body.quaternion;
 
-                    // Over the right shoulder (closer zoom)
-                    const shoulderOffset = new THREE.Vector3(1.5, 2.0, 3.0).applyQuaternion(mechaQuat);
+                    // Over the right shoulder (behind -Z, right +X)
+                    const shoulderOffset = new THREE.Vector3(1.5, 2.0, -3.0).applyQuaternion(mechaQuat);
                     const targetCamPos = mechaPos.clone().add(shoulderOffset);
 
                     this.camera.position.lerp(targetCamPos, 0.15);
@@ -774,8 +767,8 @@ class DioramaScene {
                     if (this.inputManager && this.inputManager.aimActive) {
                         this.camera.lookAt(this.mechaController.aimTarget);
                     } else {
-                        // Look forward from the shoulder
-                        const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(mechaQuat);
+                        // Look forward (+Z) from the shoulder
+                        const forward = new THREE.Vector3(0, 0, 1).applyQuaternion(mechaQuat);
                         const lookTarget = targetCamPos.clone().add(forward.multiplyScalar(10));
                         this.camera.lookAt(lookTarget);
                     }
