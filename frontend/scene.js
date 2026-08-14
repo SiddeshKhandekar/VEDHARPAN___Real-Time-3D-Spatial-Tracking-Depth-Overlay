@@ -40,6 +40,7 @@ class DioramaScene {
         this.hudFps = document.getElementById('fps');
         this.hudHead = document.getElementById('head-coords');
         this.hudHand = document.getElementById('hands-coords');
+        this.hudCameraMode = document.getElementById('camera-mode');
 
         // Main scene objects
         this.scene = null;
@@ -69,12 +70,16 @@ class DioramaScene {
         this.orbitYaw = 0;
         this.orbitPitch = 0;
 
+        // Camera Modes: 0=Free Roam, 1=Third Person, 2=First Person, 3=Aiming
+        this.cameraMode = 0;
+        this.cameraModeNames = ['Free Roam', 'Third Person', 'First Person', 'Aiming View'];
+
         // Physics and Logic
         this.physicsWorld = null;
         this.inputManager = null;
         this.effects = null;
         this.mechaController = null;
-        
+
         // Game State
         this.score = 0;
         this.lastTime = performance.now();
@@ -131,6 +136,16 @@ class DioramaScene {
             });
         }
 
+        // Camera Mode Toggle (V key)
+        window.addEventListener('keydown', (e) => {
+            if (e.key.toLowerCase() === 'v') {
+                this.cameraMode = (this.cameraMode + 1) % 4;
+                if (this.hudCameraMode) {
+                    this.hudCameraMode.textContent = this.cameraModeNames[this.cameraMode];
+                }
+            }
+        });
+
         // Mouse Drag Orbit Controls
         this.renderer.domElement.addEventListener('mousedown', (e) => {
             this.isDragging = true;
@@ -160,7 +175,7 @@ class DioramaScene {
 
         // 9. Initialize Systems
         this.physicsWorld = new PhysicsWorld();
-        
+
         this.inputManager = new InputManager(this.camera, this.renderer.domElement);
         this.effects = new VisualEffects(this.scene);
 
@@ -225,7 +240,7 @@ class DioramaScene {
         });
 
         const jointGeo = new THREE.SphereGeometry(0.22, 10, 10);
-        
+
         // Cylinder geometry for bones.
         const boneGeo = new THREE.CylinderGeometry(0.22, 0.22, 1, 8);
         boneGeo.translate(0, 0.5, 0); // Translate so origin is at one end
@@ -241,7 +256,7 @@ class DioramaScene {
             [13, 14], [14, 15], [15, 16],
             // Pinky
             [17, 18], [18, 19], [19, 20],
-            
+
             // Palm Solid Fill
             [0, 1], [0, 5], [0, 9], [0, 13], [0, 17], // wrist to knuckles
             [1, 5], [5, 9], [9, 13], [13, 17],        // horizontal knuckle webbing
@@ -252,7 +267,7 @@ class DioramaScene {
             const rigGroup = new THREE.Group();
             const spheres = [];
             const bones = [];
-            
+
             for (let i = 0; i < 21; i++) {
                 const sphere = new THREE.Mesh(jointGeo, shadowOnlyMat);
                 sphere.castShadow = true;
@@ -261,7 +276,7 @@ class DioramaScene {
                 rigGroup.add(sphere);
                 spheres.push(sphere);
             }
-            
+
             for (let i = 0; i < this.handConnections.length; i++) {
                 const bone = new THREE.Mesh(boneGeo, shadowOnlyMat);
                 bone.castShadow = true;
@@ -270,7 +285,7 @@ class DioramaScene {
                 rigGroup.add(bone);
                 bones.push(bone);
             }
-            
+
             // Central palm volume proxy (slightly larger)
             const palmGeo = new THREE.SphereGeometry(0.2, 10, 10);
             const palm = new THREE.Mesh(palmGeo, shadowOnlyMat);
@@ -316,7 +331,7 @@ class DioramaScene {
                 this.roomModel.position.set(0, -2.7, 0);
                 this.roomModel.rotation.set(0, 1.6, 0);
                 this.roomModel.scale.set(1.2, 1.2, 1.2);
-                
+
                 this.roomModel.updateMatrixWorld(true);
                 this.roomModel.traverse((child) => {
                     if (child.isMesh) {
@@ -340,7 +355,7 @@ class DioramaScene {
                         configureShadows(this.mechaModel, true, true);
                         this.scene.add(this.mechaModel);
                         console.log('Loaded: Centerpiece Mecha');
-                        
+
                         // Initialize controller
                         this.mechaController = new MechaController(
                             this.scene,
@@ -418,7 +433,7 @@ class DioramaScene {
                     tireClone.scale.set(0.4, 0.4, 0.4);
                     configureShadows(tireClone, true, true);
                     this.scene.add(tireClone);
-                    
+
                     // Add to physics
                     this.physicsWorld.addDynamicBody(tireClone, 20, 'cylinder', 0.4);
                 });
@@ -458,16 +473,16 @@ class DioramaScene {
                 if (data.hands) {
                     this.latestHands = data.hands;
                     this.hudHand.textContent = `${data.hands.length} detected`;
-                    
+
                     if (this.inputManager && data.hands.length > 0) {
                         const hand = data.hands[0];
                         const gestures = hand.gesture ? [hand.gesture] : [];
-                        
+
                         // Map hand center to world space aim target (e.g., Z=-10)
                         const hx = THREE.MathUtils.mapLinear(hand.center.x, -1.0, 1.0, OCCLUDER_MIN_X, OCCLUDER_MAX_X);
                         const hy = THREE.MathUtils.mapLinear(hand.center.y, -1.0, 1.0, OCCLUDER_MIN_Y, OCCLUDER_MAX_Y);
                         const targetPos = new THREE.Vector3(hx, hy, -10);
-                        
+
                         this.inputManager.updateGestures(gestures, targetPos);
                     }
                 }
@@ -583,24 +598,24 @@ class DioramaScene {
                     sphere.position.y += (lmY - sphere.position.y) * 0.35;
                     sphere.position.z += (lmZ - sphere.position.z) * 0.35;
                 }
-                
+
                 // Update bones based on spheres positions
                 for (let i = 0; i < this.handConnections.length; i++) {
                     const [idxA, idxB] = this.handConnections[i];
                     const posA = rig.spheres[idxA].position;
                     const posB = rig.spheres[idxB].position;
-                    
+
                     const bone = rig.bones[i];
                     const distance = posA.distanceTo(posB);
                     if (distance > 0.001) {
                         bone.position.copy(posA);
                         bone.scale.set(1, distance, 1);
-                        
+
                         const dir = new THREE.Vector3().subVectors(posB, posA).normalize();
                         bone.quaternion.setFromUnitVectors(up, dir);
                     }
                 }
-                
+
                 // Update palm position (average of key points)
                 const palmIndices = [0, 5, 9, 13, 17];
                 const palmCenter = new THREE.Vector3();
@@ -647,11 +662,11 @@ class DioramaScene {
         const mesh = new THREE.Mesh(geo, mat);
         mesh.position.copy(position);
         this.scene.add(mesh);
-        
+
         const body = this.physicsWorld.addDynamicBody(mesh, 1, 'sphere', 0.2);
         const speed = 20;
         body.velocity.set(direction.x * speed, direction.y * speed, direction.z * speed);
-        
+
         // Auto remove
         setTimeout(() => {
             if (mesh.parent) {
@@ -659,7 +674,7 @@ class DioramaScene {
                 // Body removed in step() when mesh.parent is null
             }
         }, 3000);
-        
+
         // Simple collision explosion
         body.addEventListener("collide", (e) => {
             if (mesh.parent) {
@@ -681,22 +696,92 @@ class DioramaScene {
         const dt = (now - this.lastTime) / 1000;
         this.lastTime = now;
 
-        // 1. Update camera parallax projections
-        this.applyParallax();
-        
-        // Override camera if hand gesture aiming
-        if (this.inputManager && this.inputManager.gestureAimActive) {
-            if (this.handRigs.length > 0) {
-                // Find primary hand rig center
-                const rig = this.handRigs[0];
-                const palmPos = rig.palm.position;
-                if (palmPos.y > -5) {
-                    // Hand is visible, shift camera behind it
-                    const targetCamPos = new THREE.Vector3(palmPos.x, palmPos.y + 0.5, palmPos.z + 2);
-                    this.camera.position.lerp(targetCamPos, 0.1);
-                    this.camera.lookAt(palmPos.x, palmPos.y, palmPos.z - 10);
+        // 1. Update camera based on mode
+        switch (this.cameraMode) {
+            case 0: // Free Roam
+                // Apply dynamic camera parallax and offset calculations
+                this.applyParallax();
+
+                // Override camera if hand gesture aiming in Free Roam
+                if (this.inputManager && this.inputManager.gestureAimActive) {
+                    if (this.handRigs.length > 0) {
+                        const rig = this.handRigs[0];
+                        const palmPos = rig.palm.position;
+                        if (palmPos.y > -5) {
+                            const targetCamPos = new THREE.Vector3(palmPos.x, palmPos.y + 0.5, palmPos.z + 2);
+                            this.camera.position.lerp(targetCamPos, 0.1);
+                            this.camera.lookAt(palmPos.x, palmPos.y, palmPos.z - 10);
+                        }
+                    }
                 }
-            }
+                break;
+
+            case 1: // Third Person
+                if (this.mechaController && this.mechaController.mesh) {
+                    const mechaPos = this.mechaController.mesh.position;
+                    const mechaQuat = this.mechaController.body.quaternion;
+
+                    // Offset: behind (in local Z if mecha faces Z) and up
+                    // Because mecha initially points -Z (or rotates towards velocity vector). We can base it purely on its current velocity/orientation.
+                    // Let's use the mecha's forward vector. mecha Model is at rotation Math.PI so its forward is technically +Z in local coordinates before Math.PI rotation. 
+                    // Actually, mechaController sets body quaternion based on velocity.
+                    const forward = new THREE.Vector3(0, 0, 1).applyQuaternion(mechaQuat);
+
+                    // Position camera 6 units behind, 3 units up
+                    const offset = forward.clone().multiplyScalar(6);
+                    offset.y += 3;
+
+                    const targetCamPos = mechaPos.clone().add(offset);
+                    this.camera.position.lerp(targetCamPos, 0.1);
+
+                    // Look at mecha center
+                    this.camera.lookAt(mechaPos.clone().add(new THREE.Vector3(0, 1.5, 0)));
+                    this.camera.clearViewOffset(); // Ensure no parallax distortion
+                }
+                break;
+
+            case 2: // First Person
+                if (this.mechaController && this.mechaController.mesh) {
+                    const mechaPos = this.mechaController.mesh.position;
+                    const mechaQuat = this.mechaController.body.quaternion;
+
+                    // Position at head/cockpit
+                    const headOffset = new THREE.Vector3(0, 1.8, -0.5).applyQuaternion(mechaQuat);
+                    const targetCamPos = mechaPos.clone().add(headOffset);
+
+                    this.camera.position.copy(targetCamPos);
+
+                    // Look forward
+                    const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(mechaQuat);
+                    const lookTarget = targetCamPos.clone().add(forward.multiplyScalar(10));
+                    this.camera.lookAt(lookTarget);
+                    this.camera.clearViewOffset();
+                }
+                break;
+
+            case 3: // Aiming View
+                if (this.mechaController && this.mechaController.mesh) {
+                    const mechaPos = this.mechaController.mesh.position;
+                    const mechaQuat = this.mechaController.body.quaternion;
+
+                    // Over the right shoulder (closer zoom)
+                    const shoulderOffset = new THREE.Vector3(1.5, 2.0, 3.0).applyQuaternion(mechaQuat);
+                    const targetCamPos = mechaPos.clone().add(shoulderOffset);
+
+                    this.camera.position.lerp(targetCamPos, 0.15);
+
+                    // Force the camera to look where the mecha is aiming, or simply forward if not aiming
+                    if (this.inputManager && this.inputManager.aimActive) {
+                        this.camera.lookAt(this.mechaController.aimTarget);
+                    } else {
+                        // Look forward from the shoulder
+                        const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(mechaQuat);
+                        const lookTarget = targetCamPos.clone().add(forward.multiplyScalar(10));
+                        this.camera.lookAt(lookTarget);
+                    }
+                    this.camera.clearViewOffset();
+                }
+                break;
         }
 
         // 2. Adjust dynamic shadow physics occluder positions
