@@ -132,6 +132,29 @@ class DioramaScene {
             });
         }
 
+        // Main Menu Buttons
+        const btnStart = document.getElementById('btn-start');
+        if (btnStart) {
+            btnStart.addEventListener('click', () => {
+                this.gameState = 'playing';
+                document.getElementById('main-menu').classList.add('hidden');
+
+                // Ensure physics actually start acting from now
+                this.lastTime = performance.now();
+            });
+        }
+
+        const btnQuit = document.getElementById('btn-quit');
+        if (btnQuit) {
+            btnQuit.addEventListener('click', () => {
+                if (this.socket && this.socket.readyState === WebSocket.OPEN) {
+                    this.socket.send(JSON.stringify({ command: "shutdown" }));
+                } else {
+                    window.close(); // Fallback if no socket connection
+                }
+            });
+        }
+
         // Mouse Drag Orbit Controls
         this.renderer.domElement.addEventListener('mousedown', (e) => {
             this.isDragging = true;
