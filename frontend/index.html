@@ -1,11 +1,12 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>VEDHARPAN 3D Viewport</title>
     <link rel="stylesheet" href="style.css">
-    
+
     <!-- ES Module Import Map for Three.js and loaders -->
     <script type="importmap">
         {
@@ -17,6 +18,7 @@
         }
     </script>
 </head>
+
 <body>
     <!-- Main WebGL rendering canvas -->
     <canvas id="viewport"></canvas>
@@ -36,11 +38,22 @@
         <div class="game-hud-item">🔫 <span id="ammo">∞</span></div>
         <div class="game-hud-item">🏆 <span id="score">0</span></div>
     </div>
-    
+
     <!-- Crosshair -->
     <div id="crosshair"></div>
+
+    <!-- Main Menu -->
+    <div id="main-menu" class="main-menu">
+        <h1 class="game-title">VEDHARPAN</h1>
+        <div class="menu-buttons">
+            <button id="btn-start" class="menu-btn">Start Game</button>
+            <button id="btn-options" class="menu-btn">Options</button>
+            <button id="btn-quit" class="menu-btn">Quit</button>
+        </div>
+    </div>
 
     <!-- Main Scene script -->
     <script type="module" src="scene.js"></script>
 </body>
+
 </html>

@@ -74,8 +74,9 @@ class DioramaScene {
         this.inputManager = null;
         this.effects = null;
         this.mechaController = null;
-        
+
         // Game State
+        this.gameState = 'menu'; // 'menu' or 'playing'
         this.score = 0;
         this.lastTime = performance.now();
 
@@ -160,7 +161,7 @@ class DioramaScene {
 
         // 9. Initialize Systems
         this.physicsWorld = new PhysicsWorld();
-        
+
         this.inputManager = new InputManager(this.camera, this.renderer.domElement);
         this.effects = new VisualEffects(this.scene);
 
@@ -225,7 +226,7 @@ class DioramaScene {
         });
 
         const jointGeo = new THREE.SphereGeometry(0.22, 10, 10);
-        
+
         // Cylinder geometry for bones.
         const boneGeo = new THREE.CylinderGeometry(0.22, 0.22, 1, 8);
         boneGeo.translate(0, 0.5, 0); // Translate so origin is at one end
@@ -241,7 +242,7 @@ class DioramaScene {
             [13, 14], [14, 15], [15, 16],
             // Pinky
             [17, 18], [18, 19], [19, 20],
-            
+
             // Palm Solid Fill
             [0, 1], [0, 5], [0, 9], [0, 13], [0, 17], // wrist to knuckles
             [1, 5], [5, 9], [9, 13], [13, 17],        // horizontal knuckle webbing
@@ -252,7 +253,7 @@ class DioramaScene {
             const rigGroup = new THREE.Group();
             const spheres = [];
             const bones = [];
-            
+
             for (let i = 0; i < 21; i++) {
                 const sphere = new THREE.Mesh(jointGeo, shadowOnlyMat);
                 sphere.castShadow = true;
@@ -261,7 +262,7 @@ class DioramaScene {
                 rigGroup.add(sphere);
                 spheres.push(sphere);
             }
-            
+
             for (let i = 0; i < this.handConnections.length; i++) {
                 const bone = new THREE.Mesh(boneGeo, shadowOnlyMat);
                 bone.castShadow = true;
@@ -270,7 +271,7 @@ class DioramaScene {
                 rigGroup.add(bone);
                 bones.push(bone);
             }
-            
+
             // Central palm volume proxy (slightly larger)
             const palmGeo = new THREE.SphereGeometry(0.2, 10, 10);
             const palm = new THREE.Mesh(palmGeo, shadowOnlyMat);
@@ -316,7 +317,7 @@ class DioramaScene {
                 this.roomModel.position.set(0, -2.7, 0);
                 this.roomModel.rotation.set(0, 1.6, 0);
                 this.roomModel.scale.set(1.2, 1.2, 1.2);
-                
+
                 this.roomModel.updateMatrixWorld(true);
                 this.roomModel.traverse((child) => {
                     if (child.isMesh) {
@@ -340,7 +341,7 @@ class DioramaScene {
                         configureShadows(this.mechaModel, true, true);
                         this.scene.add(this.mechaModel);
                         console.log('Loaded: Centerpiece Mecha');
-                        
+
                         // Initialize controller
                         this.mechaController = new MechaController(
                             this.scene,
@@ -418,7 +419,7 @@ class DioramaScene {
                     tireClone.scale.set(0.4, 0.4, 0.4);
                     configureShadows(tireClone, true, true);
                     this.scene.add(tireClone);
-                    
+
                     // Add to physics
                     this.physicsWorld.addDynamicBody(tireClone, 20, 'cylinder', 0.4);
                 });
@@ -458,16 +459,16 @@ class DioramaScene {
                 if (data.hands) {
                     this.latestHands = data.hands;
                     this.hudHand.textContent = `${data.hands.length} detected`;
-                    
+
                     if (this.inputManager && data.hands.length > 0) {
                         const hand = data.hands[0];
                         const gestures = hand.gesture ? [hand.gesture] : [];
-                        
+
                         // Map hand center to world space aim target (e.g., Z=-10)
                         const hx = THREE.MathUtils.mapLinear(hand.center.x, -1.0, 1.0, OCCLUDER_MIN_X, OCCLUDER_MAX_X);
                         const hy = THREE.MathUtils.mapLinear(hand.center.y, -1.0, 1.0, OCCLUDER_MIN_Y, OCCLUDER_MAX_Y);
                         const targetPos = new THREE.Vector3(hx, hy, -10);
-                        
+
                         this.inputManager.updateGestures(gestures, targetPos);
                     }
                 }
@@ -583,24 +584,24 @@ class DioramaScene {
                     sphere.position.y += (lmY - sphere.position.y) * 0.35;
                     sphere.position.z += (lmZ - sphere.position.z) * 0.35;
                 }
-                
+
                 // Update bones based on spheres positions
                 for (let i = 0; i < this.handConnections.length; i++) {
                     const [idxA, idxB] = this.handConnections[i];
                     const posA = rig.spheres[idxA].position;
                     const posB = rig.spheres[idxB].position;
-                    
+
                     const bone = rig.bones[i];
                     const distance = posA.distanceTo(posB);
                     if (distance > 0.001) {
                         bone.position.copy(posA);
                         bone.scale.set(1, distance, 1);
-                        
+
                         const dir = new THREE.Vector3().subVectors(posB, posA).normalize();
                         bone.quaternion.setFromUnitVectors(up, dir);
                     }
                 }
-                
+
                 // Update palm position (average of key points)
                 const palmIndices = [0, 5, 9, 13, 17];
                 const palmCenter = new THREE.Vector3();
@@ -647,11 +648,11 @@ class DioramaScene {
         const mesh = new THREE.Mesh(geo, mat);
         mesh.position.copy(position);
         this.scene.add(mesh);
-        
+
         const body = this.physicsWorld.addDynamicBody(mesh, 1, 'sphere', 0.2);
         const speed = 20;
         body.velocity.set(direction.x * speed, direction.y * speed, direction.z * speed);
-        
+
         // Auto remove
         setTimeout(() => {
             if (mesh.parent) {
@@ -659,7 +660,7 @@ class DioramaScene {
                 // Body removed in step() when mesh.parent is null
             }
         }, 3000);
-        
+
         // Simple collision explosion
         body.addEventListener("collide", (e) => {
             if (mesh.parent) {
@@ -683,7 +684,7 @@ class DioramaScene {
 
         // 1. Update camera parallax projections
         this.applyParallax();
-        
+
         // Override camera if hand gesture aiming
         if (this.inputManager && this.inputManager.gestureAimActive) {
             if (this.handRigs.length > 0) {
@@ -702,16 +703,21 @@ class DioramaScene {
         // 2. Adjust dynamic shadow physics occluder positions
         this.applyShadowOcclusion();
 
-        // 3. Update Physics and Logic
-        if (this.physicsWorld) this.physicsWorld.step(dt);
-        if (this.inputManager) {
-            // Provide collidable meshes for mouse raycasting
-            const interactables = [];
-            if (this.roomModel) interactables.push(this.roomModel);
-            this.inputManager.update(interactables);
+        // 3. Update Physics and Logic (Only if playing)
+        if (this.gameState === 'playing') {
+            if (this.physicsWorld) this.physicsWorld.step(dt);
+            if (this.inputManager) {
+                // Provide collidable meshes for mouse raycasting
+                const interactables = [];
+                if (this.roomModel) interactables.push(this.roomModel);
+                this.inputManager.update(interactables);
+            }
+            if (this.mechaController) this.mechaController.update(this.inputManager, dt);
+            if (this.effects) this.effects.update(dt);
+        } else {
+            // Apply a slow orbit rotation in the menu
+            this.orbitYaw -= 0.002;
         }
-        if (this.mechaController) this.mechaController.update(this.inputManager, dt);
-        if (this.effects) this.effects.update(dt);
 
         // 4. Render main loop frame
         this.renderer.render(this.scene, this.camera);
