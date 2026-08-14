@@ -122,7 +122,8 @@ html {
     opacity: 0.8;
 }
 
-#crosshair::before, #crosshair::after {
+#crosshair::before,
+#crosshair::after {
     content: '';
     position: absolute;
     background: rgba(255, 255, 255, 0.8);
@@ -140,4 +141,67 @@ html {
     left: 9px;
     width: 2px;
     height: 20px;
-}
+}
+
+.hidden {
+    display: none !important;
+}
+
+/* Main Menu */
+#main-menu {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    background: rgba(0, 0, 0, 0.7);
+    backdrop-filter: blur(15px);
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    z-index: 100;
+}
+
+.game-title {
+    font-size: 5rem;
+    letter-spacing: 12px;
+    margin-bottom: 50px;
+    background: linear-gradient(135deg, #00f2fe 0%, #4facfe 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    text-shadow: 0 4px 30px rgba(79, 172, 254, 0.4);
+}
+
+.menu-buttons {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+    width: 300px;
+}
+
+.menu-btn {
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    color: white;
+    padding: 15px 30px;
+    font-size: 1.2rem;
+    font-weight: bold;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.3s ease;
+}
+
+.menu-btn:hover {
+    background: rgba(255, 255, 255, 0.15);
+    border-color: #4facfe;
+    box-shadow: 0 0 20px rgba(79, 172, 254, 0.4);
+    transform: translateY(-2px);
+}
+
+.menu-btn:active {
+    transform: translateY(0);
+}

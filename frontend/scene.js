@@ -149,6 +149,7 @@ class DioramaScene {
                 document.getElementById('main-menu').classList.add('hidden');
                 document.getElementById('hud').classList.remove('hidden');
                 document.getElementById('game-hud').classList.remove('hidden');
+                document.getElementById('crosshair').classList.remove('hidden');
 
                 // Hide cursor when playing
                 this.renderer.domElement.requestPointerLock = this.renderer.domElement.requestPointerLock || this.renderer.domElement.mozRequestPointerLock;
