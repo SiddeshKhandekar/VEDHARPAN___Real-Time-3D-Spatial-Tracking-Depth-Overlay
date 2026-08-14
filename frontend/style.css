@@ -143,6 +143,10 @@ html {
     height: 20px;
 }
 
+.hidden {
+    display: none !important;
+}
+
 /* Main Menu */
 #main-menu {
     position: absolute;
@@ -157,10 +161,6 @@ html {
     justify-content: center;
     align-items: center;
     z-index: 100;
-}
-
-#main-menu.hidden {
-    display: none;
 }
 
 .game-title {

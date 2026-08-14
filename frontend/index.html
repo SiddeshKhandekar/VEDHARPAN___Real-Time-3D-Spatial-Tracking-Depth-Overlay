@@ -24,23 +24,34 @@
     <canvas id="viewport"></canvas>
 
     <!-- Overlay HUD for server status and diagnostics -->
-    <div id="hud">
+    <div id="hud" class="hidden">
         <div class="hud-item">Status: <span id="status" class="disconnected">Disconnected</span></div>
         <div class="hud-item">FPS: <span id="fps">0</span></div>
         <div class="hud-item">Head: <span id="head-coords">x: 0.00, y: 0.00, z: 0.00</span></div>
         <div class="hud-item">Hands: <span id="hands-coords">0 detected</span></div>
+        <div class="hud-item">Camera: <span id="camera-mode">Free Roam</span></div>
         <button id="disconnect-btn" class="hud-item disconnect-btn">Disconnect & Close</button>
     </div>
 
     <!-- Game HUD -->
-    <div id="game-hud">
+    <div id="game-hud" class="hidden">
         <div class="game-hud-item">❤️ <span id="health">100</span></div>
         <div class="game-hud-item">🔫 <span id="ammo">∞</span></div>
         <div class="game-hud-item">🏆 <span id="score">0</span></div>
     </div>
 
     <!-- Crosshair -->
-    <div id="crosshair"></div>
+    <div id="crosshair" class="hidden"></div>
+
+    <!-- Main Menu -->
+    <div id="main-menu" class="main-menu">
+        <h1 class="game-title">VEDHARPAN</h1>
+        <div class="menu-buttons">
+            <button id="btn-start" class="menu-btn">Start Game</button>
+            <button id="btn-options" class="menu-btn">Options</button>
+            <button id="btn-quit" class="menu-btn">Quit</button>
+        </div>
+    </div>
 
     <!-- Main Menu -->
     <div id="main-menu" class="main-menu">

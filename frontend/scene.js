@@ -40,6 +40,7 @@ class DioramaScene {
         this.hudFps = document.getElementById('fps');
         this.hudHead = document.getElementById('head-coords');
         this.hudHand = document.getElementById('hands-coords');
+        this.hudCameraMode = document.getElementById('camera-mode');
 
         // Main scene objects
         this.scene = null;
@@ -68,6 +69,14 @@ class DioramaScene {
         this.previousMousePosition = { x: 0, y: 0 };
         this.orbitYaw = 0;
         this.orbitPitch = 0;
+
+        // Free Roam Variables
+        this.freeRoamOffset = new THREE.Vector3(0, 0, 0);
+        this.isRecentering = false;
+
+        // Camera Modes: 0=Free Roam, 1=Third Person, 2=First Person, 3=Aiming
+        this.cameraMode = 0;
+        this.cameraModeNames = ['Free Roam', 'Third Person', 'First Person', 'Aiming View'];
 
         // Physics and Logic
         this.physicsWorld = null;
@@ -138,6 +147,15 @@ class DioramaScene {
             btnStart.addEventListener('click', () => {
                 this.gameState = 'playing';
                 document.getElementById('main-menu').classList.add('hidden');
+                document.getElementById('hud').classList.remove('hidden');
+                document.getElementById('game-hud').classList.remove('hidden');
+                document.getElementById('crosshair').classList.remove('hidden');
+
+                // Hide cursor when playing
+                this.renderer.domElement.requestPointerLock = this.renderer.domElement.requestPointerLock || this.renderer.domElement.mozRequestPointerLock;
+                if (this.renderer.domElement.requestPointerLock) {
+                    this.renderer.domElement.requestPointerLock();
+                }
 
                 // Ensure physics actually start acting from now
                 this.lastTime = performance.now();
@@ -154,6 +172,43 @@ class DioramaScene {
                 }
             });
         }
+
+        // Camera Mode Toggle (V key) and Numpad Free Roam
+        window.addEventListener('keydown', (e) => {
+            if (e.key.toLowerCase() === 'v') {
+                this.cameraMode = (this.cameraMode + 1) % 4;
+                if (this.hudCameraMode) {
+                    this.hudCameraMode.textContent = this.cameraModeNames[this.cameraMode];
+                }
+            }
+
+            // Numpad controls for Free Roam (cameraMode === 0)
+            if (this.cameraMode === 0 && this.gameState === 'playing') {
+                const moveSpeed = 0.8;
+                const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion);
+                const right = new THREE.Vector3(1, 0, 0).applyQuaternion(this.camera.quaternion);
+                forward.y = 0; right.y = 0;
+                forward.normalize(); right.normalize();
+
+                this.isRecentering = false;
+
+                if (e.key === '8' || e.code === 'Numpad8') {
+                    this.freeRoamOffset.add(forward.multiplyScalar(moveSpeed));
+                }
+                if (e.key === '2' || e.code === 'Numpad2') {
+                    this.freeRoamOffset.sub(forward.multiplyScalar(moveSpeed));
+                }
+                if (e.key === '4' || e.code === 'Numpad4') {
+                    this.freeRoamOffset.sub(right.multiplyScalar(moveSpeed));
+                }
+                if (e.key === '6' || e.code === 'Numpad6') {
+                    this.freeRoamOffset.add(right.multiplyScalar(moveSpeed));
+                }
+                if (e.key === '5' || e.code === 'Numpad5') {
+                    this.isRecentering = true;
+                }
+            }
+        });
 
         // Mouse Drag Orbit Controls
         this.renderer.domElement.addEventListener('mousedown', (e) => {
@@ -561,9 +616,20 @@ class DioramaScene {
         const parallaxX = this.latestHead.x * PARALLAX_SENSITIVITY_X;
         const parallaxY = this.latestHead.y * PARALLAX_SENSITIVITY_Y;
 
-        const targetCamX = orbitX + (parallaxX * rightX);
-        const targetCamY = orbitY + parallaxY;
-        const targetCamZ = orbitZ + (parallaxX * rightZ);
+        // Auto-recenter logic
+        if (this.isRecentering && this.mechaController && this.mechaController.mesh) {
+            const mechaPos = this.mechaController.mesh.position;
+            // Target is mecha pos, but down slightly so the orbit center matches
+            const targetOffset = mechaPos.clone().sub(new THREE.Vector3(0, 1.5, 0));
+            this.freeRoamOffset.lerp(targetOffset, 0.1);
+            if (this.freeRoamOffset.distanceTo(targetOffset) < 0.1) {
+                this.isRecentering = false;
+            }
+        }
+
+        const targetCamX = this.freeRoamOffset.x + orbitX + (parallaxX * rightX);
+        const targetCamY = this.freeRoamOffset.y + orbitY + parallaxY;
+        const targetCamZ = this.freeRoamOffset.z + orbitZ + (parallaxX * rightZ);
 
         // Smoothly interpolate camera position (Lerp) for stability
         this.camera.position.x += (targetCamX - this.camera.position.x) * 0.15;
@@ -580,8 +646,8 @@ class DioramaScene {
             width, height
         );
 
-        // Camera always looks at the center (0, 1.5, 0)
-        this.camera.lookAt(0, 1.5, 0);
+        // Camera always looks at the orbit center
+        this.camera.lookAt(this.freeRoamOffset.x, this.freeRoamOffset.y + 1.5, this.freeRoamOffset.z);
     }
 
     /**
@@ -705,22 +771,85 @@ class DioramaScene {
         const dt = (now - this.lastTime) / 1000;
         this.lastTime = now;
 
-        // 1. Update camera parallax projections
-        this.applyParallax();
+        // 1. Update camera based on mode
+        switch (this.cameraMode) {
+            case 0: // Free Roam
+                // Apply dynamic camera parallax and offset calculations
+                this.applyParallax();
 
-        // Override camera if hand gesture aiming
-        if (this.inputManager && this.inputManager.gestureAimActive) {
-            if (this.handRigs.length > 0) {
-                // Find primary hand rig center
-                const rig = this.handRigs[0];
-                const palmPos = rig.palm.position;
-                if (palmPos.y > -5) {
-                    // Hand is visible, shift camera behind it
-                    const targetCamPos = new THREE.Vector3(palmPos.x, palmPos.y + 0.5, palmPos.z + 2);
-                    this.camera.position.lerp(targetCamPos, 0.1);
-                    this.camera.lookAt(palmPos.x, palmPos.y, palmPos.z - 10);
+                // Override camera if hand gesture aiming in Free Roam
+                if (this.inputManager && this.inputManager.gestureAimActive) {
+                    if (this.handRigs.length > 0) {
+                        const rig = this.handRigs[0];
+                        const palmPos = rig.palm.position;
+                        if (palmPos.y > -5) {
+                            const targetCamPos = new THREE.Vector3(palmPos.x, palmPos.y + 0.5, palmPos.z + 2);
+                            this.camera.position.lerp(targetCamPos, 0.1);
+                            this.camera.lookAt(palmPos.x, palmPos.y, palmPos.z - 10);
+                        }
+                    }
                 }
-            }
+                break;
+
+            case 1: // Third Person
+                if (this.mechaController && this.mechaController.mesh) {
+                    const mechaPos = this.mechaController.mesh.position;
+                    const mechaQuat = this.mechaController.body.quaternion;
+
+                    // Offset: behind (-Z) and up (+Y)
+                    const offset = new THREE.Vector3(0, 3, -6).applyQuaternion(mechaQuat);
+
+                    const targetCamPos = mechaPos.clone().add(offset);
+                    this.camera.position.lerp(targetCamPos, 0.1);
+
+                    // Look at mecha center
+                    this.camera.lookAt(mechaPos.clone().add(new THREE.Vector3(0, 1.5, 0)));
+                    this.camera.clearViewOffset(); // Ensure no parallax distortion
+                }
+                break;
+
+            case 2: // First Person
+                if (this.mechaController && this.mechaController.mesh) {
+                    const mechaPos = this.mechaController.mesh.position;
+                    const mechaQuat = this.mechaController.body.quaternion;
+
+                    // Position at head/cockpit (slightly forward +Z)
+                    const headOffset = new THREE.Vector3(0, 1.8, 0.5).applyQuaternion(mechaQuat);
+                    const targetCamPos = mechaPos.clone().add(headOffset);
+
+                    this.camera.position.copy(targetCamPos);
+
+                    // Look forward (+Z)
+                    const forward = new THREE.Vector3(0, 0, 1).applyQuaternion(mechaQuat);
+                    const lookTarget = targetCamPos.clone().add(forward.multiplyScalar(10));
+                    this.camera.lookAt(lookTarget);
+                    this.camera.clearViewOffset();
+                }
+                break;
+
+            case 3: // Aiming View
+                if (this.mechaController && this.mechaController.mesh) {
+                    const mechaPos = this.mechaController.mesh.position;
+                    const mechaQuat = this.mechaController.body.quaternion;
+
+                    // Over the right shoulder (behind -Z, right +X)
+                    const shoulderOffset = new THREE.Vector3(1.5, 2.0, -3.0).applyQuaternion(mechaQuat);
+                    const targetCamPos = mechaPos.clone().add(shoulderOffset);
+
+                    this.camera.position.lerp(targetCamPos, 0.15);
+
+                    // Force the camera to look where the mecha is aiming, or simply forward if not aiming
+                    if (this.inputManager && this.inputManager.aimActive) {
+                        this.camera.lookAt(this.mechaController.aimTarget);
+                    } else {
+                        // Look forward (+Z) from the shoulder
+                        const forward = new THREE.Vector3(0, 0, 1).applyQuaternion(mechaQuat);
+                        const lookTarget = targetCamPos.clone().add(forward.multiplyScalar(10));
+                        this.camera.lookAt(lookTarget);
+                    }
+                    this.camera.clearViewOffset();
+                }
+                break;
         }
 
         // 2. Adjust dynamic shadow physics occluder positions
