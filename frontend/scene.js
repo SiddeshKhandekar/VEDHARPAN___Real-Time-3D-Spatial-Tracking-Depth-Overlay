@@ -70,6 +70,10 @@ class DioramaScene {
         this.orbitYaw = 0;
         this.orbitPitch = 0;
 
+        // Free Roam Variables
+        this.freeRoamOffset = new THREE.Vector3(0, 0, 0);
+        this.isRecentering = false;
+
         // Camera Modes: 0=Free Roam, 1=Third Person, 2=First Person, 3=Aiming
         this.cameraMode = 0;
         this.cameraModeNames = ['Free Roam', 'Third Person', 'First Person', 'Aiming View'];
@@ -81,6 +85,7 @@ class DioramaScene {
         this.mechaController = null;
 
         // Game State
+        this.gameState = 'menu'; // 'menu' or 'playing'
         this.score = 0;
         this.lastTime = performance.now();
 
@@ -130,6 +135,35 @@ class DioramaScene {
         const disconnectBtn = document.getElementById('disconnect-btn');
         if (disconnectBtn) {
             disconnectBtn.addEventListener('click', () => {
+                if (this.socket && this.socket.readyState === WebSocket.OPEN) {
+                    this.socket.send(JSON.stringify({ command: "shutdown" }));
+                }
+            });
+        }
+
+        // Main Menu Buttons
+        const btnStart = document.getElementById('btn-start');
+        if (btnStart) {
+            btnStart.addEventListener('click', () => {
+                this.gameState = 'playing';
+                document.getElementById('main-menu').classList.add('hidden');
+                document.getElementById('hud').classList.remove('hidden');
+                document.getElementById('game-hud').classList.remove('hidden');
+
+                // Hide cursor when playing
+                this.renderer.domElement.requestPointerLock = this.renderer.domElement.requestPointerLock || this.renderer.domElement.mozRequestPointerLock;
+                if (this.renderer.domElement.requestPointerLock) {
+                    this.renderer.domElement.requestPointerLock();
+                }
+
+                // Ensure physics actually start acting from now
+                this.lastTime = performance.now();
+            });
+        }
+
+        const btnQuit = document.getElementById('btn-quit');
+        if (btnQuit) {
+            btnQuit.addEventListener('click', () => {
                 if (this.socket && this.socket.readyState === WebSocket.OPEN) {
                     this.socket.send(JSON.stringify({ command: "shutdown" }));
                 }
@@ -818,16 +852,21 @@ class DioramaScene {
         // 2. Adjust dynamic shadow physics occluder positions
         this.applyShadowOcclusion();
 
-        // 3. Update Physics and Logic
-        if (this.physicsWorld) this.physicsWorld.step(dt);
-        if (this.inputManager) {
-            // Provide collidable meshes for mouse raycasting
-            const interactables = [];
-            if (this.roomModel) interactables.push(this.roomModel);
-            this.inputManager.update(interactables);
+        // 3. Update Physics and Logic (Only if playing)
+        if (this.gameState === 'playing') {
+            if (this.physicsWorld) this.physicsWorld.step(dt);
+            if (this.inputManager) {
+                // Provide collidable meshes for mouse raycasting
+                const interactables = [];
+                if (this.roomModel) interactables.push(this.roomModel);
+                this.inputManager.update(interactables);
+            }
+            if (this.mechaController) this.mechaController.update(this.inputManager, dt);
+            if (this.effects) this.effects.update(dt);
+        } else {
+            // Apply a slow orbit rotation in the menu
+            this.orbitYaw -= 0.002;
         }
-        if (this.mechaController) this.mechaController.update(this.inputManager, dt);
-        if (this.effects) this.effects.update(dt);
 
         // 4. Render main loop frame
         this.renderer.render(this.scene, this.camera);
