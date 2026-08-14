@@ -136,12 +136,39 @@ class DioramaScene {
             });
         }
 
-        // Camera Mode Toggle (V key)
+        // Camera Mode Toggle (V key) and Numpad Free Roam
         window.addEventListener('keydown', (e) => {
             if (e.key.toLowerCase() === 'v') {
                 this.cameraMode = (this.cameraMode + 1) % 4;
                 if (this.hudCameraMode) {
                     this.hudCameraMode.textContent = this.cameraModeNames[this.cameraMode];
+                }
+            }
+
+            // Numpad controls for Free Roam (cameraMode === 0)
+            if (this.cameraMode === 0 && this.gameState === 'playing') {
+                const moveSpeed = 0.8;
+                const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion);
+                const right = new THREE.Vector3(1, 0, 0).applyQuaternion(this.camera.quaternion);
+                forward.y = 0; right.y = 0;
+                forward.normalize(); right.normalize();
+
+                this.isRecentering = false; // Interrupt recentering if user moves
+
+                if (e.key === '8' || e.code === 'Numpad8') {
+                    this.freeRoamOffset.add(forward.multiplyScalar(moveSpeed));
+                }
+                if (e.key === '2' || e.code === 'Numpad2') {
+                    this.freeRoamOffset.sub(forward.multiplyScalar(moveSpeed));
+                }
+                if (e.key === '4' || e.code === 'Numpad4') {
+                    this.freeRoamOffset.sub(right.multiplyScalar(moveSpeed));
+                }
+                if (e.key === '6' || e.code === 'Numpad6') {
+                    this.freeRoamOffset.add(right.multiplyScalar(moveSpeed));
+                }
+                if (e.key === '5' || e.code === 'Numpad5') {
+                    this.isRecentering = true;
                 }
             }
         });
@@ -552,9 +579,20 @@ class DioramaScene {
         const parallaxX = this.latestHead.x * PARALLAX_SENSITIVITY_X;
         const parallaxY = this.latestHead.y * PARALLAX_SENSITIVITY_Y;
 
-        const targetCamX = orbitX + (parallaxX * rightX);
-        const targetCamY = orbitY + parallaxY;
-        const targetCamZ = orbitZ + (parallaxX * rightZ);
+        // Auto-recenter logic
+        if (this.isRecentering && this.mechaController && this.mechaController.mesh) {
+            const mechaPos = this.mechaController.mesh.position;
+            // Target is mecha pos, but down slightly so the orbit center matches
+            const targetOffset = mechaPos.clone().sub(new THREE.Vector3(0, 1.5, 0));
+            this.freeRoamOffset.lerp(targetOffset, 0.1);
+            if (this.freeRoamOffset.distanceTo(targetOffset) < 0.1) {
+                this.isRecentering = false;
+            }
+        }
+
+        const targetCamX = this.freeRoamOffset.x + orbitX + (parallaxX * rightX);
+        const targetCamY = this.freeRoamOffset.y + orbitY + parallaxY;
+        const targetCamZ = this.freeRoamOffset.z + orbitZ + (parallaxX * rightZ);
 
         // Smoothly interpolate camera position (Lerp) for stability
         this.camera.position.x += (targetCamX - this.camera.position.x) * 0.15;
@@ -571,8 +609,8 @@ class DioramaScene {
             width, height
         );
 
-        // Camera always looks at the center (0, 1.5, 0)
-        this.camera.lookAt(0, 1.5, 0);
+        // Camera always looks at the orbit center
+        this.camera.lookAt(this.freeRoamOffset.x, this.freeRoamOffset.y + 1.5, this.freeRoamOffset.z);
     }
 
     /**
