@@ -167,6 +167,8 @@ class DioramaScene {
             btnQuit.addEventListener('click', () => {
                 if (this.socket && this.socket.readyState === WebSocket.OPEN) {
                     this.socket.send(JSON.stringify({ command: "shutdown" }));
+                } else {
+                    window.close(); // Fallback if no socket connection
                 }
             });
         }
@@ -188,7 +190,7 @@ class DioramaScene {
                 forward.y = 0; right.y = 0;
                 forward.normalize(); right.normalize();
 
-                this.isRecentering = false; // Interrupt recentering if user moves
+                this.isRecentering = false;
 
                 if (e.key === '8' || e.code === 'Numpad8') {
                     this.freeRoamOffset.add(forward.multiplyScalar(moveSpeed));
