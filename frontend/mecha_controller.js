@@ -85,7 +85,7 @@ export class MechaController {
         // Aiming mode (right-click held): snap mecha to face camera forward (COD-style)
         if (inputManager.aimActive) {
             // Build a look direction from the camera's current forward in XZ plane
-            const camForward = new THREE.Vector3(0, 0, 1).applyQuaternion(this.camera.quaternion);
+            const camForward = new THREE.Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion);
             camForward.y = 0;
             if (camForward.lengthSq() > 0.001) {
                 camForward.normalize();
@@ -119,7 +119,7 @@ export class MechaController {
         const barrelPos = barrelLocalPos.applyMatrix4(this.mesh.matrixWorld);
 
         // Direction: camera forward projected onto XZ, includes Y pitch
-        const camForward = new THREE.Vector3(0, 0, 1).applyQuaternion(this.camera.quaternion).normalize();
+        const camForward = new THREE.Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion).normalize();
         const shootDir = (this.aimTarget && this.aimTarget.lengthSq() > 0.1)
             ? new THREE.Vector3().subVectors(this.aimTarget, barrelPos).normalize()
             : camForward;

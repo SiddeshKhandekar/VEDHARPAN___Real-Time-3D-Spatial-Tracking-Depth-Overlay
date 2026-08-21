@@ -85,7 +85,7 @@ export class InputManager {
         }
     }
 
-    update(sceneObjects) {
+    update(sceneObjects, cameraMode = 0) {
         // Resolve aiming targets
 
         // Gesture takes priority
@@ -99,8 +99,11 @@ export class InputManager {
             this.isShooting = this.mouseState.left;
 
             if (this.aimActive || this.isShooting) {
+                // Determine raycast origin: (0,0) in pointer lock modes, else real mousePos
+                const rayPos = (cameraMode !== 0) ? new THREE.Vector2(0, 0) : this.mousePos;
+
                 // Raycast into scene to find target point
-                this.raycaster.setFromCamera(this.mousePos, this.camera);
+                this.raycaster.setFromCamera(rayPos, this.camera);
 
                 // Assuming sceneObjects is an array of meshes to raycast against
                 const intersects = this.raycaster.intersectObjects(sceneObjects, true);

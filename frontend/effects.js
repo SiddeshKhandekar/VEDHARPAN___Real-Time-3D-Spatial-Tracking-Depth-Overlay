@@ -40,11 +40,12 @@ export class VisualEffects {
      * scene.js spawns and controls its physics velocity.
      */
     createProjectileMesh(fireMode) {
+        // Defines the look of the projectile itself
         const cfg = {
-            1: { r: 0.22, color: 0x00eeff, emissive: 0x00ccff, emissiveIntensity: 2.0, glow: 0.8 },
-            2: { r: 0.10, color: 0xffee00, emissive: 0xffaa00, emissiveIntensity: 3.0, glow: 0.4 },
-            3: { r: 0.16, color: 0xff6600, emissive: 0xff3300, emissiveIntensity: 2.5, glow: 0.6 },
-            4: { r: 0.55, color: 0xdd00ff, emissive: 0xaa00ff, emissiveIntensity: 4.0, glow: 1.5 },
+            1: { r: 0.22, color: 0x6600ff, emissive: 0x9933ff, emissiveIntensity: 2.0, glow: 0.8 }, // Blueish Purple
+            2: { r: 0.10, color: 0xff4400, emissive: 0xff8800, emissiveIntensity: 3.0, glow: 0.4 }, // Fire Color
+            3: { r: 0.16, color: 0xffffff, emissive: 0x00aaff, emissiveIntensity: 2.5, glow: 0.6 }, // Missile core
+            4: { r: 0.55, color: 0xff0000, emissive: 0xaa0000, emissiveIntensity: 4.0, glow: 1.5 }, // Red Grenade
         }[fireMode] ?? { r: 0.2, color: 0x00ffff, emissive: 0x00ffff, emissiveIntensity: 2, glow: 0.8 };
 
         const mat = new THREE.MeshStandardMaterial({
@@ -74,6 +75,21 @@ export class VisualEffects {
         glow.scale.setScalar(cfg.glow * 2.5);
         mesh.add(glow);
 
+        // Fire trailing engine plume for missiles (mode 3)
+        if (fireMode === 3 || fireMode === 30) {
+            const plumeMat = new THREE.SpriteMaterial({
+                color: 0xff5500,
+                transparent: true,
+                opacity: 0.8,
+                blending: THREE.AdditiveBlending,
+                depthWrite: false,
+            });
+            const plume = new THREE.Sprite(plumeMat);
+            plume.scale.setScalar(1.2);
+            plume.position.set(0, 0, 0.4); // trail behind
+            mesh.add(plume);
+        }
+
         // Point light riding the projectile
         const light = new THREE.PointLight(cfg.emissive, 3, 6);
         mesh.add(light);
@@ -82,8 +98,8 @@ export class VisualEffects {
     }
 
     triggerMuzzleFlash(position, fireMode = 1) {
-        const colors = { 1: 0x00eeff, 2: 0xffee00, 3: 0xff6600, 4: 0xdd00ff };
-        this.muzzleLight.color.set(colors[fireMode] ?? 0x00ffff);
+        const colors = { 1: 0x9933ff, 2: 0xff8800, 3: 0x00aaff, 4: 0xff0000 };
+        this.muzzleLight.color.set(colors[fireMode] ?? 0x9933ff);
         this.muzzleLight.position.copy(position);
         this.muzzleLight.intensity = fireMode === 4 ? 12 : 6;
         this.muzzleFlashActive = true;
@@ -92,11 +108,11 @@ export class VisualEffects {
 
     createExplosion(position, fireMode = 1) {
         const cfg = {
-            1: { n: 18, color: 0x00eeff, speed: 0.18, size: 0.12, life: 1.0 },
-            2: { n: 8, color: 0xffee00, speed: 0.28, size: 0.07, life: 0.5 },
-            3: { n: 14, color: 0xff6600, speed: 0.22, size: 0.10, life: 0.8 },
-            4: { n: 40, color: 0xdd00ff, speed: 0.12, size: 0.22, life: 1.6 },
-        }[fireMode] ?? { n: 18, color: 0x00eeff, speed: 0.18, size: 0.12, life: 1.0 };
+            1: { n: 18, color: 0x9933ff, speed: 0.18, size: 0.12, life: 1.0 }, // blueish purple
+            2: { n: 8, color: 0xff8800, speed: 0.28, size: 0.07, life: 0.5 }, // fire
+            3: { n: 14, color: 0xffaa00, speed: 0.22, size: 0.10, life: 0.8 }, // missile burst (fire color)
+            4: { n: 40, color: 0xff0000, speed: 0.12, size: 0.22, life: 1.6 }, // red grenade blast
+        }[fireMode] ?? { n: 18, color: 0x9933ff, speed: 0.18, size: 0.12, life: 1.0 };
 
         const mat = new THREE.MeshBasicMaterial({
             color: cfg.color,
@@ -130,7 +146,7 @@ export class VisualEffects {
         if (fireMode === 4) {
             const ringGeo = new THREE.TorusGeometry(0.1, 0.05, 6, 32);
             const ringMat = new THREE.MeshBasicMaterial({
-                color: 0xdd00ff, transparent: true, opacity: 0.9,
+                color: 0xff0000, transparent: true, opacity: 0.9,
                 blending: THREE.AdditiveBlending, depthWrite: false,
             });
             const ring = new THREE.Mesh(ringGeo, ringMat);

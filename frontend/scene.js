@@ -274,13 +274,13 @@ class DioramaScene {
         });
 
         // Fire mode HUD label update
-        const fireModeNames = { 1: 'PLASMA', 2: 'RAPID', 3: 'SPREAD', 4: 'CHARGED' };
-        const fireModeColors = { 1: '#00eeff', 2: '#ffee00', 3: '#ff6600', 4: '#dd00ff' };
+        const fireModeNames = { 1: 'PLASMA', 2: 'RAPID', 3: 'MISSILE', 4: 'GRENADE' };
+        const fireModeColors = { 1: '#9933ff', 2: '#ff8800', 3: '#ff5500', 4: '#ff0000' };
         window.addEventListener('fireModeChanged', (e) => {
             const el = document.getElementById('fire-mode-name');
             if (el) {
                 el.textContent = fireModeNames[e.detail] ?? 'PLASMA';
-                el.style.color = fireModeColors[e.detail] ?? '#00eeff';
+                el.style.color = fireModeColors[e.detail] ?? '#9933ff';
             }
         });
 
@@ -802,7 +802,8 @@ class DioramaScene {
      * @param {number} fireMode - 1=Plasma, 2=Rapid, 3=Spread, 4=Charged
      */
     spawnProjectile(position, direction, fireMode = 1) {
-        const speeds = { 1: 22, 2: 45, 3: 28, 4: 12 };
+        // Tuned stats based on user request (Missile mode is fastest)
+        const speeds = { 1: 30, 2: 40, 3: 65, 4: 15 };
         const radii = { 1: 0.22, 2: 0.10, 3: 0.16, 4: 0.55 };
         const lifetimes = { 1: 3000, 2: 1500, 3: 2500, 4: 5000 };
         const scores = { 1: 10, 2: 5, 3: 8, 4: 25 };
@@ -831,6 +832,14 @@ class DioramaScene {
         const body = this.physicsWorld.addDynamicBody(mesh, 0.5, 'sphere', radius);
         body.velocity.set(direction.x * speed, direction.y * speed, direction.z * speed);
         body.linearDamping = fireMode === 4 ? 0.2 : 0.0; // charged shot has drag
+
+        // Modes 1, 2, 3 fly in a straight laser line — neutralize gravity
+        if (fireMode !== 4) {
+            const gravityY = this.physicsWorld.world.gravity.y;
+            body.preStep = () => {
+                body.force.y -= body.mass * gravityY;
+            };
+        }
 
         // Auto-remove
         setTimeout(() => {
@@ -943,7 +952,7 @@ class DioramaScene {
                 // Provide collidable meshes for mouse raycasting
                 const interactables = [];
                 if (this.roomModel) interactables.push(this.roomModel);
-                this.inputManager.update(interactables);
+                this.inputManager.update(interactables, this.cameraMode);
             }
             if (this.mechaController) this.mechaController.update(this.inputManager, dt);
             if (this.effects) this.effects.update(dt);
