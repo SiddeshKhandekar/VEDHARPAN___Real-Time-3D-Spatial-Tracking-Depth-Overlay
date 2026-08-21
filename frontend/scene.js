@@ -491,7 +491,7 @@ class DioramaScene {
                             this.camera,
                             this.mechaModel,
                             this.effects,
-                            (pos, dir) => this.spawnProjectile(pos, dir)
+                            (pos, dir, mode) => this.spawnProjectile(pos, dir, mode)
                         );
                     },
                     undefined,
@@ -827,6 +827,9 @@ class DioramaScene {
         const visualMode = fireMode === 30 ? 3 : fireMode;
         const mesh = this.effects.createProjectileMesh(visualMode);
         mesh.position.copy(position);
+
+        // Orient the projectile mesh (+Z) to point along the flight direction
+        mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), direction);
         this.scene.add(mesh);
 
         const body = this.physicsWorld.addDynamicBody(mesh, 0.5, 'sphere', radius);

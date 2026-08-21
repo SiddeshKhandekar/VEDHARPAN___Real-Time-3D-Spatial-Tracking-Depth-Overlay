@@ -124,7 +124,7 @@ export class MechaController {
             ? new THREE.Vector3().subVectors(this.aimTarget, barrelPos).normalize()
             : camForward;
 
-        this.muzzleFlash.triggerMuzzleFlash(barrelPos);
+        this.muzzleFlash.triggerMuzzleFlash(barrelPos, fireMode);
         this.createProjectile(barrelPos, shootDir, fireMode);
     }
 }

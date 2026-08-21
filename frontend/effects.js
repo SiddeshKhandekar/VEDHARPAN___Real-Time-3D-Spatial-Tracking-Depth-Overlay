@@ -40,28 +40,48 @@ export class VisualEffects {
      * scene.js spawns and controls its physics velocity.
      */
     createProjectileMesh(fireMode) {
-        // Defines the look of the projectile itself
+        const mesh = new THREE.Group();
+        mesh.userData.fireMode = fireMode;
+
+        // Base visual config
         const cfg = {
-            1: { r: 0.22, color: 0x6600ff, emissive: 0x9933ff, emissiveIntensity: 2.0, glow: 0.8 }, // Blueish Purple
-            2: { r: 0.10, color: 0xff4400, emissive: 0xff8800, emissiveIntensity: 3.0, glow: 0.4 }, // Fire Color
-            3: { r: 0.16, color: 0xffffff, emissive: 0x00aaff, emissiveIntensity: 2.5, glow: 0.6 }, // Missile core
-            4: { r: 0.55, color: 0xff0000, emissive: 0xaa0000, emissiveIntensity: 4.0, glow: 1.5 }, // Red Grenade
-        }[fireMode] ?? { r: 0.2, color: 0x00ffff, emissive: 0x00ffff, emissiveIntensity: 2, glow: 0.8 };
+            1: { color: 0x6600ff, emissive: 0x9933ff, emissiveIntensity: 2.0, glow: 0.8 }, // Plasma
+            2: { color: 0xff4400, emissive: 0xff8800, emissiveIntensity: 3.0, glow: 0.4 }, // Bullet
+            3: { color: 0xffffff, emissive: 0x00aaff, emissiveIntensity: 2.5, glow: 0.6 }, // Missile
+            4: { color: 0xff0000, emissive: 0xaa0000, emissiveIntensity: 4.0, glow: 1.5 }, // Grenade
+        }[fireMode] ?? { color: 0x00ffff, emissive: 0x00ffff, emissiveIntensity: 2, glow: 0.8 };
 
         const mat = new THREE.MeshStandardMaterial({
-            color: cfg.color,
-            emissive: cfg.emissive,
-            emissiveIntensity: cfg.emissiveIntensity,
-            metalness: 0.0,
-            roughness: 0.0,
-            transparent: true,
-            opacity: 0.95,
-            blending: THREE.AdditiveBlending,
-            depthWrite: false,
+            color: cfg.color, emissive: cfg.emissive, emissiveIntensity: cfg.emissiveIntensity,
+            transparent: true, opacity: 0.95, blending: THREE.AdditiveBlending, depthWrite: false
         });
 
-        const mesh = new THREE.Mesh(this._getGeo(cfg.r), mat);
-        mesh.userData.fireMode = fireMode;
+        let geoMesh;
+        if (fireMode === 1) {
+            // Plasma: Smooth round ball
+            geoMesh = new THREE.Mesh(new THREE.SphereGeometry(0.25, 16, 16), mat);
+        } else if (fireMode === 2) {
+            // Rapid: Stretched bullet
+            geoMesh = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 0.4, 8), mat);
+            geoMesh.rotation.x = Math.PI / 2; // point along Z
+        } else if (fireMode === 3 || fireMode === 30) {
+            // Spread: Pointy Missile
+            geoMesh = new THREE.Mesh(new THREE.ConeGeometry(0.12, 0.5, 8), mat);
+            geoMesh.rotation.x = Math.PI / 2; // point along Z
+        } else if (fireMode === 4) {
+            // Charged: Red Space Grenade with a plate
+            const core = new THREE.Mesh(new THREE.IcosahedronGeometry(0.4, 1), mat);
+            const plateGeo = new THREE.CylinderGeometry(0.65, 0.65, 0.05, 16);
+            const plate = new THREE.Mesh(plateGeo, mat.clone());
+            plate.material.opacity = 0.7;
+            plate.rotation.x = Math.PI / 2; // plate facing forward
+            geoMesh = new THREE.Group();
+            geoMesh.add(core, plate);
+        } else {
+            geoMesh = new THREE.Mesh(new THREE.SphereGeometry(0.2, 8, 8), mat);
+        }
+
+        mesh.add(geoMesh);
 
         // Glow sprite (billboard)
         const glowMat = new THREE.SpriteMaterial({
@@ -86,7 +106,7 @@ export class VisualEffects {
             });
             const plume = new THREE.Sprite(plumeMat);
             plume.scale.setScalar(1.2);
-            plume.position.set(0, 0, 0.4); // trail behind
+            plume.position.set(0, 0, -0.3); // trail behind the cone base
             mesh.add(plume);
         }
 
