@@ -77,6 +77,7 @@ class DioramaScene {
         // Camera Modes: 0=Free Roam, 1=Third Person, 2=First Person, 3=Aiming
         this.cameraMode = 0;
         this.cameraModeNames = ['Free Roam', 'Third Person', 'First Person', 'Aiming View'];
+        this.previousCameraMode = undefined; // for right-click aim toggle
 
         // Physics and Logic
         this.physicsWorld = null;
@@ -151,14 +152,10 @@ class DioramaScene {
                 document.getElementById('game-hud').classList.remove('hidden');
                 document.getElementById('crosshair').classList.remove('hidden');
 
-                // Hide cursor when playing
-                this.renderer.domElement.requestPointerLock = this.renderer.domElement.requestPointerLock || this.renderer.domElement.mozRequestPointerLock;
-                if (this.renderer.domElement.requestPointerLock) {
-                    this.renderer.domElement.requestPointerLock();
-                }
-
-                // Ensure physics actually start acting from now
                 this.lastTime = performance.now();
+                // Start in Free Roam — pointer lock not active yet
+                this.cameraMode = 0;
+                if (this.hudCameraMode) this.hudCameraMode.textContent = this.cameraModeNames[0];
             });
         }
 
@@ -180,6 +177,7 @@ class DioramaScene {
                 if (this.hudCameraMode) {
                     this.hudCameraMode.textContent = this.cameraModeNames[this.cameraMode];
                 }
+                this._applyPointerLock();
             }
 
             // Numpad controls for Free Roam (cameraMode === 0)
@@ -210,16 +208,27 @@ class DioramaScene {
             }
         });
 
-        // Mouse Drag Orbit Controls & Aiming View Toggle
+        // Pointer Lock change handler — sync our state if browser exits lock externally (e.g. Esc)
+        document.addEventListener('pointerlockchange', () => {
+            if (!document.pointerLockElement && this.cameraMode !== 0) {
+                // User pressed Escape — switch back to Free Roam so cursor is usable
+                this.cameraMode = 0;
+                if (this.hudCameraMode) this.hudCameraMode.textContent = this.cameraModeNames[0];
+            }
+        });
+
+        // Mouse controls: Free Roam = drag orbit, other modes = pointer-lock look
         this.renderer.domElement.addEventListener('mousedown', (e) => {
-            if (e.button === 2) {
-                // Right click hold - enter aiming mode
+            if (e.button === 2 && this.gameState === 'playing') {
+                // Right-click hold → enter Aiming View
                 if (this.cameraMode !== 3) {
                     this.previousCameraMode = this.cameraMode;
                     this.cameraMode = 3;
                     if (this.hudCameraMode) this.hudCameraMode.textContent = this.cameraModeNames[3];
+                    this._applyPointerLock();
                 }
-            } else {
+            } else if (e.button === 0 && this.cameraMode === 0) {
+                // Free Roam left-click drag
                 this.isDragging = true;
                 this.previousMousePosition = { x: e.offsetX, y: e.offsetY };
             }
@@ -227,11 +236,12 @@ class DioramaScene {
 
         this.renderer.domElement.addEventListener('mouseup', (e) => {
             if (e.button === 2) {
-                // Right click release - exit aiming mode
+                // Right-click release → restore previous camera mode
                 if (this.previousCameraMode !== undefined) {
                     this.cameraMode = this.previousCameraMode;
                     if (this.hudCameraMode) this.hudCameraMode.textContent = this.cameraModeNames[this.cameraMode];
                     this.previousCameraMode = undefined;
+                    this._applyPointerLock();
                 }
             } else {
                 this.isDragging = false;
@@ -239,22 +249,31 @@ class DioramaScene {
         });
 
         this.renderer.domElement.addEventListener('mousemove', (e) => {
-            if (this.isDragging) {
+            const sensitivity = 0.0025;
+            if (document.pointerLockElement === this.renderer.domElement) {
+                // Pointer-locked: raw delta movement → rotate orbit
+                this.orbitYaw -= e.movementX * sensitivity;
+                this.orbitPitch -= e.movementY * sensitivity;
+                this.orbitPitch = Math.max(-Math.PI / 2 + 0.05, Math.min(Math.PI / 2 - 0.05, this.orbitPitch));
+            } else if (this.isDragging && this.cameraMode === 0) {
+                // Free Roam click-drag orbit
                 const deltaX = e.offsetX - this.previousMousePosition.x;
                 const deltaY = e.offsetY - this.previousMousePosition.y;
-
                 this.orbitYaw -= deltaX * 0.005;
                 this.orbitPitch -= deltaY * 0.005;
-
-                // Clamp pitch to prevent flipping
                 this.orbitPitch = Math.max(-Math.PI / 2 + 0.1, Math.min(Math.PI / 2 - 0.1, this.orbitPitch));
-
                 this.previousMousePosition = { x: e.offsetX, y: e.offsetY };
             }
         });
 
-        this.renderer.domElement.addEventListener('mouseup', () => { this.isDragging = false; });
         this.renderer.domElement.addEventListener('mouseleave', () => { this.isDragging = false; });
+
+        // Click canvas when not locked to re-acquire pointer lock (non-free-roam)
+        this.renderer.domElement.addEventListener('click', () => {
+            if (this.gameState === 'playing' && this.cameraMode !== 0) {
+                this.renderer.domElement.requestPointerLock();
+            }
+        });
 
         // 8. Connect to WebSocket Telemetry Server
         this.connectTelemetry();
@@ -267,6 +286,20 @@ class DioramaScene {
 
         // 10. Start Rendering Loop
         this.animate();
+    }
+
+    /**
+     * Request or exit Pointer Lock depending on current camera mode.
+     * Free Roam (0) = mouse cursor visible for dragging.
+     * All other modes = cursor hidden, movementX/Y drives the camera orbit.
+     */
+    _applyPointerLock() {
+        if (this.gameState !== 'playing') return;
+        if (this.cameraMode === 0) {
+            if (document.pointerLockElement) document.exitPointerLock();
+        } else {
+            this.renderer.domElement.requestPointerLock();
+        }
     }
 
     /**
@@ -813,62 +846,55 @@ class DioramaScene {
                 }
                 break;
 
-            case 1: // Third Person
+            case 1: // Third Person — orbit camera around mecha using orbitYaw/orbitPitch
                 if (this.mechaController && this.mechaController.mesh) {
                     const mechaPos = this.mechaController.mesh.position;
-                    const mechaQuat = this.mechaController.body.quaternion;
 
-                    // Offset: behind (-Z) and up (+Y)
-                    const offset = new THREE.Vector3(0, 3, -6).applyQuaternion(mechaQuat);
+                    // Build orbit quaternion from independent yaw/pitch
+                    const yawQuat = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), this.orbitYaw);
+                    const pitchQuat = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), this.orbitPitch);
+                    const orbitQuat = yawQuat.multiply(pitchQuat);
 
+                    const offset = new THREE.Vector3(0, 2, -6).applyQuaternion(orbitQuat);
                     const targetCamPos = mechaPos.clone().add(offset);
-                    this.camera.position.lerp(targetCamPos, 0.1);
-
-                    // Look at mecha center
+                    this.camera.position.lerp(targetCamPos, 0.12);
                     this.camera.lookAt(mechaPos.clone().add(new THREE.Vector3(0, 1.5, 0)));
-                    this.camera.clearViewOffset(); // Ensure no parallax distortion
-                }
-                break;
-
-            case 2: // First Person
-                if (this.mechaController && this.mechaController.mesh) {
-                    const mechaPos = this.mechaController.mesh.position;
-                    const mechaQuat = this.mechaController.body.quaternion;
-
-                    // Position at head/cockpit (slightly forward +Z)
-                    const headOffset = new THREE.Vector3(0, 1.8, 0.5).applyQuaternion(mechaQuat);
-                    const targetCamPos = mechaPos.clone().add(headOffset);
-
-                    this.camera.position.copy(targetCamPos);
-
-                    // Look forward (+Z)
-                    const forward = new THREE.Vector3(0, 0, 1).applyQuaternion(mechaQuat);
-                    const lookTarget = targetCamPos.clone().add(forward.multiplyScalar(10));
-                    this.camera.lookAt(lookTarget);
                     this.camera.clearViewOffset();
                 }
                 break;
 
-            case 3: // Aiming View
+            case 2: // First Person — cockpit position, look along orbit yaw
                 if (this.mechaController && this.mechaController.mesh) {
                     const mechaPos = this.mechaController.mesh.position;
-                    const mechaQuat = this.mechaController.body.quaternion;
 
-                    // Over the right shoulder (behind -Z, right +X)
-                    const shoulderOffset = new THREE.Vector3(1.5, 2.0, -3.0).applyQuaternion(mechaQuat);
+                    const yawQuat = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), this.orbitYaw);
+                    const pitchQuat = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), this.orbitPitch);
+                    const orbitQuat = yawQuat.multiply(pitchQuat);
+
+                    const headOffset = new THREE.Vector3(0, 1.8, 0.3).applyQuaternion(orbitQuat);
+                    const targetCamPos = mechaPos.clone().add(headOffset);
+                    this.camera.position.copy(targetCamPos);
+
+                    const forward = new THREE.Vector3(0, 0, 1).applyQuaternion(orbitQuat);
+                    this.camera.lookAt(targetCamPos.clone().add(forward.multiplyScalar(10)));
+                    this.camera.clearViewOffset();
+                }
+                break;
+
+            case 3: // Aiming View — tight over-shoulder, orbit-driven
+                if (this.mechaController && this.mechaController.mesh) {
+                    const mechaPos = this.mechaController.mesh.position;
+
+                    const yawQuat = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), this.orbitYaw);
+                    const pitchQuat = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), this.orbitPitch);
+                    const orbitQuat = yawQuat.multiply(pitchQuat);
+
+                    const shoulderOffset = new THREE.Vector3(0.8, 1.8, -2.8).applyQuaternion(orbitQuat);
                     const targetCamPos = mechaPos.clone().add(shoulderOffset);
+                    this.camera.position.lerp(targetCamPos, 0.18);
 
-                    this.camera.position.lerp(targetCamPos, 0.15);
-
-                    // Force the camera to look where the mecha is aiming, or simply forward if not aiming
-                    if (this.inputManager && this.inputManager.aimActive) {
-                        this.camera.lookAt(this.mechaController.aimTarget);
-                    } else {
-                        // Look forward (+Z) from the shoulder
-                        const forward = new THREE.Vector3(0, 0, 1).applyQuaternion(mechaQuat);
-                        const lookTarget = targetCamPos.clone().add(forward.multiplyScalar(10));
-                        this.camera.lookAt(lookTarget);
-                    }
+                    const forward = new THREE.Vector3(0, 0, 1).applyQuaternion(orbitQuat);
+                    this.camera.lookAt(targetCamPos.clone().add(forward.multiplyScalar(50)));
                     this.camera.clearViewOffset();
                 }
                 break;
