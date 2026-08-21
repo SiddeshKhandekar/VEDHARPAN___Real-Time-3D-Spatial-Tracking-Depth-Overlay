@@ -7,7 +7,7 @@ export class PhysicsWorld {
         this.world.gravity.set(0, -9.82, 0); // Earth gravity
         this.world.broadphase = new CANNON.SAPBroadphase(this.world);
         this.world.solver.iterations = 10;
-        
+
         // Physics materials
         this.defaultMaterial = new CANNON.Material('default');
         const defaultContactMaterial = new CANNON.ContactMaterial(this.defaultMaterial, this.defaultMaterial, {
@@ -31,7 +31,7 @@ export class PhysicsWorld {
         }
 
         const geometry = mesh.geometry;
-        
+
         // Cannon.js Trimesh needs an array of vertices and indices
         let vertices;
         if (geometry.attributes.position.array instanceof Float32Array) {
@@ -62,7 +62,7 @@ export class PhysicsWorld {
             mass: 0, // static body
             material: this.defaultMaterial
         });
-        
+
         body.addShape(trimeshShape);
 
         // Position, rotate, and scale based on world matrix
@@ -76,14 +76,14 @@ export class PhysicsWorld {
         // Apply scale to the vertices of the shape itself by scaling the body shape
         // Wait, CANNON.Trimesh does not have a setScale directly on the instance, it scales via the constructor or by scaling the vertices before passing them.
         // Let's scale vertices before creating the Trimesh shape instead!
-        
+
         const scaledVertices = [];
         for (let i = 0; i < vertices.length; i += 3) {
             scaledVertices.push(vertices[i] * worldScale.x);
             scaledVertices.push(vertices[i + 1] * worldScale.y);
             scaledVertices.push(vertices[i + 2] * worldScale.z);
         }
-        
+
         const scaledTrimeshShape = new CANNON.Trimesh(scaledVertices, indices);
         const scaledBody = new CANNON.Body({
             mass: 0,
@@ -107,7 +107,7 @@ export class PhysicsWorld {
         } else if (shapeType === 'box') {
             shape = new CANNON.Box(new CANNON.Vec3(radiusOrSize.x, radiusOrSize.y, radiusOrSize.z));
         } else if (shapeType === 'cylinder') {
-            shape = new CANNON.Cylinder(radiusOrSize, radiusOrSize, radiusOrSize*2, 16);
+            shape = new CANNON.Cylinder(radiusOrSize, radiusOrSize, radiusOrSize * 2, 16);
         }
 
         const body = new CANNON.Body({
@@ -122,28 +122,36 @@ export class PhysicsWorld {
         body.linearDamping = 0.3;
         body.angularDamping = 0.3;
         this.world.addBody(body);
-        
+
         this.dynamicBodies.push({ mesh, body });
         return body;
     }
-    
+
 
 
     step(dt) {
+        // Enforce anti-gravity for straight-flying projectiles
+        for (let pair of this.dynamicBodies) {
+            if (pair.body.ignoreGravity) {
+                // Apply upward force exactly equal and opposite to gravity
+                pair.body.force.y -= pair.body.mass * this.world.gravity.y;
+            }
+        }
+
         // Step physics
-        this.world.step(1/60, dt, 3);
-        
+        this.world.step(1 / 60, dt, 3);
+
         // Sync graphics
         for (let i = this.dynamicBodies.length - 1; i >= 0; i--) {
             const pair = this.dynamicBodies[i];
-            
+
             // Check if mesh has been removed/destroyed
             if (!pair.mesh.parent) {
                 this.world.removeBody(pair.body);
                 this.dynamicBodies.splice(i, 1);
                 continue;
             }
-            
+
             pair.mesh.position.copy(pair.body.position);
             pair.mesh.quaternion.copy(pair.body.quaternion);
         }

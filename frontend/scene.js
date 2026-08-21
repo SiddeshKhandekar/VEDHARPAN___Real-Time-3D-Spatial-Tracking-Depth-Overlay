@@ -843,10 +843,7 @@ class DioramaScene {
 
         // Modes 1, 2, 3 fly in a straight laser line — neutralize gravity
         if (fireMode !== 4) {
-            const gravityY = this.physicsWorld.world.gravity.y;
-            body.preStep = () => {
-                body.force.y -= body.mass * gravityY;
-            };
+            body.ignoreGravity = true;
         }
 
         // Auto-remove
