@@ -40,7 +40,18 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import cv2
 import mediapipe as mp
+from mediapipe.tasks.python import BaseOptions
+from mediapipe.tasks.python.vision import (
+    FaceLandmarker,
+    FaceLandmarkerOptions,
+    HandLandmarker,
+    HandLandmarkerOptions,
+)
 import numpy as np
+
+# Path to downloaded .task model files (relative to project root)
+import pathlib
+_MODEL_DIR = pathlib.Path(__file__).resolve().parent / "models"
 
 # ---------------------------------------------------------------------------
 # Module-level logger — honours the root logger configuration set in main.py
@@ -258,14 +269,14 @@ def _estimate_head_depth(
     return normalised_depth
 
 
-def _estimate_hand_depth(hand_landmarks, frame_width: int, frame_height: int) -> float:
+def _estimate_hand_depth(landmarks_list, frame_width: int, frame_height: int) -> float:
     """Estimate normalised hand depth from the palm bounding-box diagonal.
 
     Larger hand = closer to the camera; smaller = further away.
     The reference diagonal is calibrated to a mid-distance hand position.
 
     Args:
-        hand_landmarks: MediaPipe NormalizedLandmarkList for one hand.
+        landmarks_list: List of NormalizedLandmark for one hand (21 items).
         frame_width:    Captured frame width in pixels.
         frame_height:   Captured frame height in pixels.
 
@@ -273,8 +284,8 @@ def _estimate_hand_depth(hand_landmarks, frame_width: int, frame_height: int) ->
         A float in the range [-1.0, 1.0] representing relative depth.
     """
     # Collect pixel coordinates for all 21 landmarks.
-    xs = [lm.x * frame_width  for lm in hand_landmarks.landmark]
-    ys = [lm.y * frame_height for lm in hand_landmarks.landmark]
+    xs = [lm.x * frame_width  for lm in landmarks_list]
+    ys = [lm.y * frame_height for lm in landmarks_list]
 
     x_min, x_max = min(xs), max(xs)
     y_min, y_max = min(ys), max(ys)
@@ -387,32 +398,39 @@ class VisionPipeline:
     # ------------------------------------------------------------------
 
     def _initialise_mediapipe(self) -> None:
-        """Construct MediaPipe Face Mesh and Hands solution objects.
+        """Construct MediaPipe FaceLandmarker and HandLandmarker using the Tasks API.
 
-        Called once at the start of the worker thread. Iris-landmark
-        refinement is enabled on Face Mesh for sub-pixel pupil accuracy.
+        Called once at the start of the worker thread.
+        Requires face_landmarker.task and hand_landmarker.task in the models/ directory.
         """
-        mp_face_mesh = mp.solutions.face_mesh   # type: ignore[attr-defined]
-        mp_hands     = mp.solutions.hands        # type: ignore[attr-defined]
+        face_model_path = str(_MODEL_DIR / "face_landmarker.task")
+        hand_model_path = str(_MODEL_DIR / "hand_landmarker.task")
 
-        self._face_mesh = mp_face_mesh.FaceMesh(
-            max_num_faces            = 1,
-            refine_landmarks         = True,   # enables 10 iris landmarks
-            min_detection_confidence = 0.6,
-            min_tracking_confidence  = 0.5,
+        face_options = FaceLandmarkerOptions(
+            base_options=BaseOptions(model_asset_path=face_model_path),
+            num_faces=1,
+            min_face_detection_confidence=0.6,
+            min_face_presence_confidence=0.5,
+            min_tracking_confidence=0.5,
+            output_face_blendshapes=False,
+            output_facial_transformation_matrixes=False,
         )
 
-        self._hands = mp_hands.Hands(
-            model_complexity         = 1,      # Higher accuracy over a larger radius
-            max_num_hands            = 2,
-            min_detection_confidence = 0.4,
-            min_tracking_confidence  = 0.4,
+        hand_options = HandLandmarkerOptions(
+            base_options=BaseOptions(model_asset_path=hand_model_path),
+            num_hands=2,
+            min_hand_detection_confidence=0.4,
+            min_hand_presence_confidence=0.4,
+            min_tracking_confidence=0.4,
         )
 
-        logger.info("VisionPipeline: MediaPipe Face Mesh and Hands initialised.")
+        self._face_mesh = FaceLandmarker.create_from_options(face_options)
+        self._hands     = HandLandmarker.create_from_options(hand_options)
+
+        logger.info("VisionPipeline: MediaPipe FaceLandmarker and HandLandmarker initialised (Tasks API).")
 
     def _release_mediapipe(self) -> None:
-        """Close MediaPipe solution contexts to free GPU/model memory."""
+        """Close MediaPipe task contexts to free GPU/model memory."""
         if self._face_mesh is not None:
             self._face_mesh.close()
             self._face_mesh = None
@@ -514,14 +532,13 @@ class VisionPipeline:
 
             frame_height, frame_width = bgr_frame.shape[:2]
 
-            # MediaPipe requires RGB; OpenCV captures in BGR.
-            # Marking the array non-writeable avoids an internal buffer copy.
+            # MediaPipe Tasks API requires an mp.Image wrapper around RGB numpy data.
             rgb_frame = cv2.cvtColor(bgr_frame, cv2.COLOR_BGR2RGB)
-            rgb_frame.flags.writeable = False
+            mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb_frame)
 
             # --- Run inference on both models ---
-            face_results = self._face_mesh.process(rgb_frame)
-            hand_results = self._hands.process(rgb_frame)
+            face_results = self._face_mesh.detect(mp_image)
+            hand_results = self._hands.detect(mp_image)
 
             # --- Extract raw spatial vectors ---
             raw_head = self._extract_head_vector(
@@ -602,20 +619,30 @@ class VisionPipeline:
         Returns:
             A raw SpatialVector for the head position.
         """
-        if not face_results.multi_face_landmarks:
+        if not face_results.face_landmarks:
             self._head_ema.reset()
             return SpatialVector(0.0, 0.0, 0.0)
 
-        landmarks = face_results.multi_face_landmarks[0].landmark
+        landmarks = face_results.face_landmarks[0]  # List[NormalizedLandmark]
+
+        # The Tasks API face_landmarker returns 478 landmarks (468 mesh + 10 iris)
+        # Check if iris landmarks are available; fall back to inner eye corners if not.
+        if len(landmarks) > RIGHT_IRIS_CENTER_IDX:
+            left_iris_lm  = landmarks[LEFT_IRIS_CENTER_IDX]
+            right_iris_lm = landmarks[RIGHT_IRIS_CENTER_IDX]
+        else:
+            # Fallback: inner eye corners (landmarks 133 and 362)
+            left_iris_lm  = landmarks[133]
+            right_iris_lm = landmarks[362]
 
         # Pixel positions of the iris centres.
         left_iris  = (
-            landmarks[LEFT_IRIS_CENTER_IDX].x  * frame_width,
-            landmarks[LEFT_IRIS_CENTER_IDX].y  * frame_height,
+            left_iris_lm.x  * frame_width,
+            left_iris_lm.y  * frame_height,
         )
         right_iris = (
-            landmarks[RIGHT_IRIS_CENTER_IDX].x * frame_width,
-            landmarks[RIGHT_IRIS_CENTER_IDX].y * frame_height,
+            right_iris_lm.x * frame_width,
+            right_iris_lm.y * frame_height,
         )
 
         # Midpoint of the two irises → horizontal/vertical gaze centre.
@@ -677,12 +704,13 @@ class VisionPipeline:
         Returns:
             A list of tuples (SpatialVector, List[Dict], str) containing center, landmarks, and gesture.
         """
-        if not hand_results.multi_hand_landmarks:
+        if not hand_results.hand_landmarks:
             return []
 
         hands_data = []
-        for hand_landmarks in hand_results.multi_hand_landmarks:
-            wrist = hand_landmarks.landmark[WRIST_LANDMARK_IDX]
+        for hand_landmark_list in hand_results.hand_landmarks:
+            # hand_landmark_list is List[NormalizedLandmark] (21 items)
+            wrist = hand_landmark_list[WRIST_LANDMARK_IDX]
 
             wrist_pixel_x = wrist.x * frame_width
             wrist_pixel_y = wrist.y * frame_height
@@ -690,11 +718,11 @@ class VisionPipeline:
             norm_x, norm_y = _normalise_pixel(
                 wrist_pixel_x, wrist_pixel_y, frame_width, frame_height
             )
-            norm_z = _estimate_hand_depth(hand_landmarks, frame_width, frame_height)
+            norm_z = _estimate_hand_depth(hand_landmark_list, frame_width, frame_height)
 
             # Collect all 21 normalised landmark points for the frontend rig.
             all_landmarks: List[Dict[str, float]] = []
-            for lm in hand_landmarks.landmark:
+            for lm in hand_landmark_list:
                 # Invert the X coordinate to fix the hand mirror/chirality issue
                 mirrored_pixel_x = (1.0 - lm.x) * frame_width
                 
@@ -711,7 +739,7 @@ class VisionPipeline:
                     "z": round(lm_norm_z, 5),
                 })
             
-            gesture = self._classify_gesture(hand_landmarks.landmark)
+            gesture = self._classify_gesture(hand_landmark_list)
             hands_data.append((SpatialVector(x=norm_x, y=norm_y, z=norm_z), all_landmarks, gesture))
 
         return hands_data
