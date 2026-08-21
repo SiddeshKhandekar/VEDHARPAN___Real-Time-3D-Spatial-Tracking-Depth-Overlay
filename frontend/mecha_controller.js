@@ -96,19 +96,20 @@ export class MechaController {
         if (inputManager.isShooting) {
             this.shoot();
         }
-
-        shoot() {
-            const now = performance.now();
-            if (now - this.lastShotTime < this.shootCooldown) return;
-            this.lastShotTime = now;
-
-            // Gun barrel position (approximate, local to mecha)
-            const barrelLocalPos = new THREE.Vector3(0, 1.2, 0.5);
-            const barrelPos = barrelLocalPos.applyMatrix4(this.mesh.matrixWorld);
-
-            const shootDir = new THREE.Vector3().subVectors(this.aimTarget, barrelPos).normalize();
-
-            this.muzzleFlash.trigger(barrelPos);
-            this.createProjectile(barrelPos, shootDir);
-        }
     }
+
+    shoot() {
+        const now = performance.now();
+        if (now - this.lastShotTime < this.shootCooldown) return;
+        this.lastShotTime = now;
+
+        // Gun barrel position (approximate, local to mecha)
+        const barrelLocalPos = new THREE.Vector3(0, 1.2, 0.5);
+        const barrelPos = barrelLocalPos.applyMatrix4(this.mesh.matrixWorld);
+
+        const shootDir = new THREE.Vector3().subVectors(this.aimTarget, barrelPos).normalize();
+
+        this.muzzleFlash.trigger(barrelPos);
+        this.createProjectile(barrelPos, shootDir);
+    }
+}
