@@ -24,7 +24,7 @@
     <canvas id="viewport"></canvas>
 
     <!-- Overlay HUD for server status and diagnostics -->
-    <div id="hud" class="hidden">
+    <div id="hud">
         <div class="hud-item">Status: <span id="status" class="disconnected">Disconnected</span></div>
         <div class="hud-item">FPS: <span id="fps">0</span></div>
         <div class="hud-item">Head: <span id="head-coords">x: 0.00, y: 0.00, z: 0.00</span></div>
@@ -34,7 +34,7 @@
     </div>
 
     <!-- Game HUD -->
-    <div id="game-hud" class="hidden">
+    <div id="game-hud">
         <div class="game-hud-item">❤️ <span id="health">100</span></div>
         <div class="game-hud-item">🔫 <span id="ammo">∞</span></div>
         <div class="game-hud-item">🏆 <span id="score">0</span></div>
@@ -42,10 +42,10 @@
     </div>
 
     <!-- Crosshair -->
-    <div id="crosshair" class="hidden"></div>
+    <div id="crosshair"></div>
 
     <!-- Main Menu -->
-    <div id="main-menu" class="main-menu">
+    <div id="main-menu" class="main-menu hidden">
         <h1 class="game-title">VEDHARPAN</h1>
         <div class="menu-buttons">
             <button id="btn-start" class="menu-btn">Start Game</button>

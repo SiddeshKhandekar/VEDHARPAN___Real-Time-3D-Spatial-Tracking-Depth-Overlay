@@ -85,8 +85,8 @@ class DioramaScene {
         this.effects = null;
         this.mechaController = null;
 
-        // Game State
-        this.gameState = 'menu'; // 'menu' or 'playing'
+        // Game State (Always playing to keep world alive in background)
+        this.gameState = 'playing';
         this.score = 0;
         this.lastTime = performance.now();
 
@@ -145,17 +145,19 @@ class DioramaScene {
         // Main Menu Buttons
         const btnStart = document.getElementById('btn-start');
         if (btnStart) {
+            btnStart.textContent = "Resume Game / Start Active";
             btnStart.addEventListener('click', () => {
-                this.gameState = 'playing';
+                const isFirstStart = !document.getElementById('hud').classList.contains('hidden');
+
+                // Close menu
                 document.getElementById('main-menu').classList.add('hidden');
                 document.getElementById('hud').classList.remove('hidden');
                 document.getElementById('game-hud').classList.remove('hidden');
                 document.getElementById('crosshair').classList.remove('hidden');
 
-                this.lastTime = performance.now();
-                // Start in Free Roam — pointer lock not active yet
-                this.cameraMode = 0;
-                if (this.hudCameraMode) this.hudCameraMode.textContent = this.cameraModeNames[0];
+                if (this.cameraMode !== 0) {
+                    this.renderer.domElement.requestPointerLock();
+                }
             });
         }
 
@@ -172,6 +174,31 @@ class DioramaScene {
 
         // Camera Mode Toggle (V key) and Numpad Free Roam
         window.addEventListener('keydown', (e) => {
+            // ESC key to toggle Main Menu
+            if (e.key === 'Escape') {
+                const menu = document.getElementById('main-menu');
+                if (menu.classList.contains('hidden')) {
+                    // Open Menu
+                    menu.classList.remove('hidden');
+                    document.getElementById('hud').classList.add('hidden');
+                    document.getElementById('game-hud').classList.add('hidden');
+                    document.getElementById('crosshair').classList.add('hidden');
+                    if (document.pointerLockElement) {
+                        document.exitPointerLock();
+                    }
+                } else {
+                    // Close Menu (Resume)
+                    menu.classList.add('hidden');
+                    document.getElementById('hud').classList.remove('hidden');
+                    document.getElementById('game-hud').classList.remove('hidden');
+                    document.getElementById('crosshair').classList.remove('hidden');
+                    if (this.cameraMode !== 0) {
+                        this.renderer.domElement.requestPointerLock();
+                    }
+                }
+                return; // Disable other keystrokes if opening menu
+            }
+
             if (e.key.toLowerCase() === 'v') {
                 this.cameraMode = (this.cameraMode + 1) % 4;
                 if (this.hudCameraMode) {
@@ -950,21 +977,34 @@ class DioramaScene {
         // 2. Adjust dynamic shadow physics occluder positions
         this.applyShadowOcclusion();
 
-        // 3. Update Physics and Logic (Only if playing)
-        if (this.gameState === 'playing') {
-            if (this.physicsWorld) this.physicsWorld.step(dt);
-            if (this.inputManager) {
-                // Provide collidable meshes for mouse raycasting
-                const interactables = [];
-                if (this.roomModel) interactables.push(this.roomModel);
+        // 3. Update Physics and Logic (Always loops, even under menu)
+        if (this.physicsWorld) this.physicsWorld.step(dt);
+        if (this.inputManager) {
+            // Provide collidable meshes for mouse raycasting
+            const interactables = [];
+            if (this.roomModel) interactables.push(this.roomModel);
+
+            // Only process input manager updates if the menu is NOT open
+            const menuOpen = !document.getElementById('main-menu').classList.contains('hidden');
+            if (!menuOpen) {
                 this.inputManager.update(interactables, this.cameraMode);
             }
-            if (this.mechaController) this.mechaController.update(this.inputManager, dt);
-            if (this.effects) this.effects.update(dt);
-        } else {
-            // Apply a slow orbit rotation in the menu
-            this.orbitYaw -= 0.002;
         }
+
+        // Mecha physics keep updating
+        if (this.mechaController) {
+            const menuOpen = !document.getElementById('main-menu').classList.contains('hidden');
+            if (menuOpen) {
+                // Clear inputs if menu is open so it stops walking/shooting
+                this.inputManager.keys['w'] = false;
+                this.inputManager.keys['s'] = false;
+                this.inputManager.keys['a'] = false;
+                this.inputManager.keys['d'] = false;
+                this.inputManager.isShooting = false;
+            }
+            this.mechaController.update(this.inputManager, dt);
+        }
+        if (this.effects) this.effects.update(dt);
 
         // 4. Render main loop frame
         this.renderer.render(this.scene, this.camera);

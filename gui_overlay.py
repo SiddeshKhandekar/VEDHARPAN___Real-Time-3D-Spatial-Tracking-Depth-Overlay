@@ -52,10 +52,11 @@ class TransparentOverlay(QMainWindow):
         self.setGeometry(100, 100, 1280, 720)
         logger.info("TransparentOverlay: Opaque window created.")
 
-        # Set window size to match primary screen geometry
+        # Set window size to match primary screen geometry and force fullscreen
         screen = QApplication.primaryScreen()
         if screen:
             self.setGeometry(screen.geometry())
+            self.showFullScreen()
             logger.info("TransparentOverlay: Bounds set to screen resolution: %s", screen.geometry())
         else:
             self.showFullScreen()
