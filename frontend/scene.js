@@ -208,14 +208,6 @@ class DioramaScene {
             }
         });
 
-        // Pointer Lock change handler — sync our state if browser exits lock externally (e.g. Esc)
-        document.addEventListener('pointerlockchange', () => {
-            if (!document.pointerLockElement && this.cameraMode !== 0) {
-                // User pressed Escape — switch back to Free Roam so cursor is usable
-                this.cameraMode = 0;
-                if (this.hudCameraMode) this.hudCameraMode.textContent = this.cameraModeNames[0];
-            }
-        });
 
         // Mouse controls: Free Roam = drag orbit, other modes = pointer-lock look
         this.renderer.domElement.addEventListener('mousedown', (e) => {
@@ -249,14 +241,14 @@ class DioramaScene {
         });
 
         this.renderer.domElement.addEventListener('mousemove', (e) => {
-            const sensitivity = 0.0025;
-            if (document.pointerLockElement === this.renderer.domElement) {
-                // Pointer-locked: raw delta movement → rotate orbit
+            const sensitivity = 0.003;
+            if (this.cameraMode !== 0 && this.gameState === 'playing') {
+                // Non-free-roam: movementX/Y always works, with or without pointer lock
                 this.orbitYaw -= e.movementX * sensitivity;
                 this.orbitPitch -= e.movementY * sensitivity;
                 this.orbitPitch = Math.max(-Math.PI / 2 + 0.05, Math.min(Math.PI / 2 - 0.05, this.orbitPitch));
             } else if (this.isDragging && this.cameraMode === 0) {
-                // Free Roam click-drag orbit
+                // Free Roam: click-drag orbit
                 const deltaX = e.offsetX - this.previousMousePosition.x;
                 const deltaY = e.offsetY - this.previousMousePosition.y;
                 this.orbitYaw -= deltaX * 0.005;

@@ -59,14 +59,8 @@ export class InputManager {
         });
 
         this.domElement.addEventListener('mousemove', (e) => {
-            if (document.pointerLockElement) {
-                // Pointer-locked: always aim from screen centre (matches crosshair)
-                this.mousePos.x = 0;
-                this.mousePos.y = 0;
-            } else {
-                this.mousePos.x = (e.clientX / window.innerWidth) * 2 - 1;
-                this.mousePos.y = -(e.clientY / window.innerHeight) * 2 + 1;
-            }
+            this.mousePos.x = (e.clientX / window.innerWidth) * 2 - 1;
+            this.mousePos.y = -(e.clientY / window.innerHeight) * 2 + 1;
         });
 
         // Prevent context menu on right click
