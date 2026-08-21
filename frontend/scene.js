@@ -273,6 +273,17 @@ class DioramaScene {
             }
         });
 
+        // Fire mode HUD label update
+        const fireModeNames = { 1: 'PLASMA', 2: 'RAPID', 3: 'SPREAD', 4: 'CHARGED' };
+        const fireModeColors = { 1: '#00eeff', 2: '#ffee00', 3: '#ff6600', 4: '#dd00ff' };
+        window.addEventListener('fireModeChanged', (e) => {
+            const el = document.getElementById('fire-mode-name');
+            if (el) {
+                el.textContent = fireModeNames[e.detail] ?? 'PLASMA';
+                el.style.color = fireModeColors[e.detail] ?? '#00eeff';
+            }
+        });
+
         // 8. Connect to WebSocket Telemetry Server
         this.connectTelemetry();
 
@@ -784,35 +795,59 @@ class DioramaScene {
         }
     }
 
-    spawnProjectile(position, direction) {
-        const geo = new THREE.SphereGeometry(0.2, 8, 8);
-        const mat = new THREE.MeshBasicMaterial({ color: 0x00ffff });
-        const mesh = new THREE.Mesh(geo, mat);
+    /**
+     * Spawns a projectile with mode-specific visuals, speed, and impact explosion.
+     * @param {THREE.Vector3} position - Barrel tip world position
+     * @param {THREE.Vector3} direction - Unit direction vector
+     * @param {number} fireMode - 1=Plasma, 2=Rapid, 3=Spread, 4=Charged
+     */
+    spawnProjectile(position, direction, fireMode = 1) {
+        const speeds = { 1: 22, 2: 45, 3: 28, 4: 12 };
+        const radii = { 1: 0.22, 2: 0.10, 3: 0.16, 4: 0.55 };
+        const lifetimes = { 1: 3000, 2: 1500, 3: 2500, 4: 5000 };
+        const scores = { 1: 10, 2: 5, 3: 8, 4: 25 };
+
+        const speed = speeds[fireMode] ?? 22;
+        const radius = radii[fireMode] ?? 0.22;
+        const lifetime = lifetimes[fireMode] ?? 3000;
+
+        // Mode 3 — Spread: fire 3 projectiles in a fan
+        if (fireMode === 3) {
+            const spread = 0.12;
+            const right = new THREE.Vector3(1, 0, 0).applyQuaternion(this.camera.quaternion);
+            [-1, 0, 1].forEach(offset => {
+                const fanned = direction.clone().addScaledVector(right, offset * spread).normalize();
+                this.spawnProjectile(position, fanned, 30); // Mode 30 = spread sub-pellet
+            });
+            return;
+        }
+
+        // Resolve visual config (sub-mode 30 = spread pellet, use mode 3 look)
+        const visualMode = fireMode === 30 ? 3 : fireMode;
+        const mesh = this.effects.createProjectileMesh(visualMode);
         mesh.position.copy(position);
         this.scene.add(mesh);
 
-        const body = this.physicsWorld.addDynamicBody(mesh, 1, 'sphere', 0.2);
-        const speed = 20;
+        const body = this.physicsWorld.addDynamicBody(mesh, 0.5, 'sphere', radius);
         body.velocity.set(direction.x * speed, direction.y * speed, direction.z * speed);
+        body.linearDamping = fireMode === 4 ? 0.2 : 0.0; // charged shot has drag
 
-        // Auto remove
+        // Auto-remove
         setTimeout(() => {
-            if (mesh.parent) {
-                this.scene.remove(mesh);
-                // Body removed in step() when mesh.parent is null
-            }
-        }, 3000);
+            if (mesh.parent) this.scene.remove(mesh);
+        }, fireMode === 30 ? 1800 : lifetime);
 
-        // Simple collision explosion
-        body.addEventListener("collide", (e) => {
+        // Collision → explosion
+        body.addEventListener('collide', () => {
             if (mesh.parent) {
-                this.effects.createExplosion(mesh.position);
+                this.effects.createExplosion(mesh.position.clone(), visualMode);
                 this.scene.remove(mesh);
-                this.score += 10;
+                this.score += scores[fireMode] ?? 10;
                 document.getElementById('score').textContent = this.score;
             }
         });
     }
+
 
     /**
      * Main Animation & Render loop. Runs at browser vertical refresh rate.
