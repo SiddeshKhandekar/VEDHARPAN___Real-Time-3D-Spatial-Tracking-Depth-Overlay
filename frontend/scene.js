@@ -210,10 +210,32 @@ class DioramaScene {
             }
         });
 
-        // Mouse Drag Orbit Controls
+        // Mouse Drag Orbit Controls & Aiming View Toggle
         this.renderer.domElement.addEventListener('mousedown', (e) => {
-            this.isDragging = true;
-            this.previousMousePosition = { x: e.offsetX, y: e.offsetY };
+            if (e.button === 2) {
+                // Right click hold - enter aiming mode
+                if (this.cameraMode !== 3) {
+                    this.previousCameraMode = this.cameraMode;
+                    this.cameraMode = 3;
+                    if (this.hudCameraMode) this.hudCameraMode.textContent = this.cameraModeNames[3];
+                }
+            } else {
+                this.isDragging = true;
+                this.previousMousePosition = { x: e.offsetX, y: e.offsetY };
+            }
+        });
+
+        this.renderer.domElement.addEventListener('mouseup', (e) => {
+            if (e.button === 2) {
+                // Right click release - exit aiming mode
+                if (this.previousCameraMode !== undefined) {
+                    this.cameraMode = this.previousCameraMode;
+                    if (this.hudCameraMode) this.hudCameraMode.textContent = this.cameraModeNames[this.cameraMode];
+                    this.previousCameraMode = undefined;
+                }
+            } else {
+                this.isDragging = false;
+            }
         });
 
         this.renderer.domElement.addEventListener('mousemove', (e) => {
