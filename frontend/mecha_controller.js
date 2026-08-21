@@ -89,15 +89,17 @@ export class MechaController {
             camForward.y = 0;
             if (camForward.lengthSq() > 0.001) {
                 camForward.normalize();
-                // Aim target = mecha pos + far point along camera forward
-                this.aimTarget.copy(this.mesh.position).add(camForward.multiplyScalar(30));
-                const lookAtVec = this.aimTarget.clone();
-                lookAtVec.y = this.mesh.position.y;
-                const m = new THREE.Matrix4();
-                m.lookAt(this.mesh.position, lookAtVec, new THREE.Vector3(0, 1, 0));
-                const targetQuat = new THREE.Quaternion().setFromRotationMatrix(m);
-                this.body.quaternion.slerp(new CANNON.Quaternion(targetQuat.x, targetQuat.y, targetQuat.z, targetQuat.w), 0.2);
+                const angle = Math.atan2(camForward.x, camForward.z);
+                const targetQuat = new CANNON.Quaternion();
+                targetQuat.setFromAxisAngle(new CANNON.Vec3(0, 1, 0), angle);
+                // Rotate body to face aim direction
+                this.body.quaternion.slerp(targetQuat, 0.2);
             }
+        }
+
+        // Always sync the precise raycasted crosshair coordinates for weapon firing
+        if (inputManager.aimTarget) {
+            this.aimTarget.copy(inputManager.aimTarget);
         }
 
         // Shoot on left-click (always, not just when aiming)
