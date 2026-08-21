@@ -85,6 +85,16 @@ class TransparentOverlay(QMainWindow):
         logger.info("TransparentOverlay: Loading local WebGL scene: %s", url.toLocalFile())
         self.web_view.load(url)
 
+        # Auto-grant feature permissions (pointer lock, notifications, etc.)
+        # This is required for GTA-style 360 mouse look to work inside PyQt WebEngine
+        from PyQt6.QtWebEngineCore import QWebEnginePage
+        def handle_permission(origin, feature):
+            self.web_view.page().setFeaturePermission(
+                origin, feature,
+                QWebEnginePage.PermissionPolicy.PermissionGrantedByUser
+            )
+        self.web_view.page().featurePermissionRequested.connect(handle_permission)
+
         self.setCentralWidget(self.web_view)
 
     def resizeEvent(self, event: QResizeEvent) -> None:

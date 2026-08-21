@@ -102,22 +102,29 @@ export class MechaController {
 
         // Shoot on left-click (always, not just when aiming)
         if (inputManager.isShooting) {
-            this.shoot();
+            this.shoot(inputManager.fireMode || 1);
         }
     }
 
-    shoot() {
+    shoot(fireMode = 1) {
         const now = performance.now();
-        if (now - this.lastShotTime < this.shootCooldown) return;
+        // Cooldown varies per mode
+        const cooldowns = { 1: 250, 2: 80, 3: 350, 4: 800 };
+        const cooldown = cooldowns[fireMode] ?? 250;
+        if (now - this.lastShotTime < cooldown) return;
         this.lastShotTime = now;
 
         // Gun barrel position (approximate, local to mecha)
         const barrelLocalPos = new THREE.Vector3(0, 1.2, 0.5);
         const barrelPos = barrelLocalPos.applyMatrix4(this.mesh.matrixWorld);
 
-        const shootDir = new THREE.Vector3().subVectors(this.aimTarget, barrelPos).normalize();
+        // Direction: camera forward projected onto XZ, includes Y pitch
+        const camForward = new THREE.Vector3(0, 0, 1).applyQuaternion(this.camera.quaternion).normalize();
+        const shootDir = (this.aimTarget && this.aimTarget.lengthSq() > 0.1)
+            ? new THREE.Vector3().subVectors(this.aimTarget, barrelPos).normalize()
+            : camForward;
 
-        this.muzzleFlash.trigger(barrelPos);
-        this.createProjectile(barrelPos, shootDir);
+        this.muzzleFlash.triggerMuzzleFlash(barrelPos);
+        this.createProjectile(barrelPos, shootDir, fireMode);
     }
 }

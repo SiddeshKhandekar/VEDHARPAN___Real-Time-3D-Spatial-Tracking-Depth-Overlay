@@ -1,88 +1,185 @@
 import * as THREE from 'three';
 
+/**
+ * VisualEffects — Handles muzzle flash, 4 plasma fire modes, and impact explosions.
+ *
+ * Fire Modes:
+ *  1 — Plasma Ball   : Single large cyan sphere, medium speed, big explosion
+ *  2 — Rapid Fire    : Small bright yellow bolts, very fast, light burst on hit
+ *  3 — Spread Shot   : 3-way fan of orange orbs (scene.js spawns 3 calls)
+ *  4 — Charged Shot  : Massive slow magenta sphere, screen-shaking mega explosion
+ */
 export class VisualEffects {
     constructor(scene) {
         this.scene = scene;
-        
+
         // Muzzle flash light
-        this.muzzleLight = new THREE.PointLight(0x00ffff, 0, 10);
+        this.muzzleLight = new THREE.PointLight(0x00ffff, 0, 12);
         this.scene.add(this.muzzleLight);
         this.muzzleFlashActive = false;
         this.muzzleFlashTimer = 0;
-        
-        // Particle arrays
+        this.muzzleFlashColor = 0x00ffff;
+
+        // Explosion / trail arrays
         this.explosions = [];
-        this.projectiles = [];
-        
-        // Particle material
-        this.particleMaterial = new THREE.MeshBasicMaterial({
-            color: 0x00ffff,
-            transparent: true,
-            opacity: 0.8,
-            blending: THREE.AdditiveBlending
-        });
-        this.particleGeo = new THREE.SphereGeometry(0.1, 4, 4);
+
+        // Shared geometry cache
+        this._geoCache = {};
     }
 
-    triggerMuzzleFlash(position) {
-        this.muzzleLight.position.copy(position);
-        this.muzzleLight.intensity = 5;
-        this.muzzleFlashActive = true;
-        this.muzzleFlashTimer = 50; // ms
+    _getGeo(r, segs = 6) {
+        const key = `${r}_${segs}`;
+        if (!this._geoCache[key]) {
+            this._geoCache[key] = new THREE.SphereGeometry(r, segs, segs);
+        }
+        return this._geoCache[key];
     }
-    
-    createExplosion(position) {
-        const explosionGroup = new THREE.Group();
-        explosionGroup.position.copy(position);
-        
-        const numParticles = 15;
-        for (let i = 0; i < numParticles; i++) {
-            const p = new THREE.Mesh(this.particleGeo, this.particleMaterial);
-            // Random direction
+
+    /**
+     * Returns a THREE.Mesh projectile scaled and coloured by fire mode.
+     * scene.js spawns and controls its physics velocity.
+     */
+    createProjectileMesh(fireMode) {
+        const cfg = {
+            1: { r: 0.22, color: 0x00eeff, emissive: 0x00ccff, emissiveIntensity: 2.0, glow: 0.8 },
+            2: { r: 0.10, color: 0xffee00, emissive: 0xffaa00, emissiveIntensity: 3.0, glow: 0.4 },
+            3: { r: 0.16, color: 0xff6600, emissive: 0xff3300, emissiveIntensity: 2.5, glow: 0.6 },
+            4: { r: 0.55, color: 0xdd00ff, emissive: 0xaa00ff, emissiveIntensity: 4.0, glow: 1.5 },
+        }[fireMode] ?? { r: 0.2, color: 0x00ffff, emissive: 0x00ffff, emissiveIntensity: 2, glow: 0.8 };
+
+        const mat = new THREE.MeshStandardMaterial({
+            color: cfg.color,
+            emissive: cfg.emissive,
+            emissiveIntensity: cfg.emissiveIntensity,
+            metalness: 0.0,
+            roughness: 0.0,
+            transparent: true,
+            opacity: 0.95,
+            blending: THREE.AdditiveBlending,
+            depthWrite: false,
+        });
+
+        const mesh = new THREE.Mesh(this._getGeo(cfg.r), mat);
+        mesh.userData.fireMode = fireMode;
+
+        // Glow sprite (billboard)
+        const glowMat = new THREE.SpriteMaterial({
+            color: cfg.emissive,
+            transparent: true,
+            opacity: 0.45,
+            blending: THREE.AdditiveBlending,
+            depthWrite: false,
+        });
+        const glow = new THREE.Sprite(glowMat);
+        glow.scale.setScalar(cfg.glow * 2.5);
+        mesh.add(glow);
+
+        // Point light riding the projectile
+        const light = new THREE.PointLight(cfg.emissive, 3, 6);
+        mesh.add(light);
+
+        return mesh;
+    }
+
+    triggerMuzzleFlash(position, fireMode = 1) {
+        const colors = { 1: 0x00eeff, 2: 0xffee00, 3: 0xff6600, 4: 0xdd00ff };
+        this.muzzleLight.color.set(colors[fireMode] ?? 0x00ffff);
+        this.muzzleLight.position.copy(position);
+        this.muzzleLight.intensity = fireMode === 4 ? 12 : 6;
+        this.muzzleFlashActive = true;
+        this.muzzleFlashTimer = fireMode === 4 ? 120 : 60; // ms
+    }
+
+    createExplosion(position, fireMode = 1) {
+        const cfg = {
+            1: { n: 18, color: 0x00eeff, speed: 0.18, size: 0.12, life: 1.0 },
+            2: { n: 8, color: 0xffee00, speed: 0.28, size: 0.07, life: 0.5 },
+            3: { n: 14, color: 0xff6600, speed: 0.22, size: 0.10, life: 0.8 },
+            4: { n: 40, color: 0xdd00ff, speed: 0.12, size: 0.22, life: 1.6 },
+        }[fireMode] ?? { n: 18, color: 0x00eeff, speed: 0.18, size: 0.12, life: 1.0 };
+
+        const mat = new THREE.MeshBasicMaterial({
+            color: cfg.color,
+            transparent: true,
+            opacity: 1.0,
+            blending: THREE.AdditiveBlending,
+            depthWrite: false,
+        });
+        const geo = this._getGeo(cfg.size, 4);
+
+        const group = new THREE.Group();
+        group.position.copy(position);
+        group.userData.maxLife = cfg.life;
+
+        for (let i = 0; i < cfg.n; i++) {
+            const p = new THREE.Mesh(geo, mat.clone());
             const dir = new THREE.Vector3(
                 Math.random() - 0.5,
                 Math.random() - 0.5,
                 Math.random() - 0.5
             ).normalize();
-            
             p.userData = {
-                velocity: dir.multiplyScalar(Math.random() * 0.2 + 0.1),
-                life: 1.0
+                velocity: dir.multiplyScalar(Math.random() * cfg.speed + cfg.speed * 0.4),
+                life: cfg.life,
+                maxLife: cfg.life,
             };
-            
-            explosionGroup.add(p);
+            group.add(p);
         }
-        
-        this.scene.add(explosionGroup);
-        this.explosions.push(explosionGroup);
+
+        // Shockwave ring for charged shot
+        if (fireMode === 4) {
+            const ringGeo = new THREE.TorusGeometry(0.1, 0.05, 6, 32);
+            const ringMat = new THREE.MeshBasicMaterial({
+                color: 0xdd00ff, transparent: true, opacity: 0.9,
+                blending: THREE.AdditiveBlending, depthWrite: false,
+            });
+            const ring = new THREE.Mesh(ringGeo, ringMat);
+            ring.userData = { isRing: true, life: 0.6, maxLife: 0.6, velocity: new THREE.Vector3() };
+            group.add(ring);
+        }
+
+        this.scene.add(group);
+        this.explosions.push(group);
     }
-    
+
     update(dt) {
-        // Update muzzle flash
+        // Muzzle flash decay
         if (this.muzzleFlashActive) {
             this.muzzleFlashTimer -= dt * 1000;
             if (this.muzzleFlashTimer <= 0) {
                 this.muzzleLight.intensity = 0;
                 this.muzzleFlashActive = false;
             } else {
-                this.muzzleLight.intensity = (this.muzzleFlashTimer / 50) * 5;
+                this.muzzleLight.intensity *= 0.92;
             }
         }
-        
-        // Update explosions
+
+        // Explosions
         for (let i = this.explosions.length - 1; i >= 0; i--) {
-            const exp = this.explosions[i];
+            const group = this.explosions[i];
             let alive = false;
-            
-            exp.children.forEach(p => {
-                p.position.add(p.userData.velocity);
-                p.userData.life -= dt * 2.0;
-                p.material.opacity = p.userData.life;
+
+            group.children.forEach(p => {
+                p.userData.life -= dt;
+                const t = p.userData.life / p.userData.maxLife;
+
+                if (p.userData.isRing) {
+                    // Expand and fade ring
+                    const scale = 1 + (1 - t) * 12;
+                    p.scale.setScalar(scale);
+                    p.material.opacity = t * 0.8;
+                } else {
+                    p.position.add(p.userData.velocity);
+                    p.userData.velocity.multiplyScalar(0.94); // drag
+                    p.material.opacity = t;
+                    p.scale.setScalar(t * 0.8 + 0.2);
+                }
+
                 if (p.userData.life > 0) alive = true;
             });
-            
+
             if (!alive) {
-                this.scene.remove(exp);
+                this.scene.remove(group);
                 this.explosions.splice(i, 1);
             }
         }

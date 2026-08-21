@@ -24,6 +24,7 @@ export class InputManager {
         this.aimActive = false;
         this.isShooting = false;
         this.aimTarget = new THREE.Vector3();
+        this.fireMode = 1; // 1=Plasma, 2=Rapid, 3=Spread, 4=Charged
 
         // Gesture overrides
         this.gestureAimActive = false;
@@ -37,8 +38,15 @@ export class InputManager {
 
     _initListeners() {
         window.addEventListener('keydown', (e) => {
-            if (this.keys.hasOwnProperty(e.key.toLowerCase())) {
-                this.keys[e.key.toLowerCase()] = true;
+            const k = e.key.toLowerCase();
+            if (this.keys.hasOwnProperty(k)) {
+                this.keys[k] = true;
+            }
+            // Fire mode switching (1-4)
+            if (['1', '2', '3', '4'].includes(e.key)) {
+                this.fireMode = parseInt(e.key);
+                // Dispatch UI update event
+                window.dispatchEvent(new CustomEvent('fireModeChanged', { detail: this.fireMode }));
             }
         });
 
