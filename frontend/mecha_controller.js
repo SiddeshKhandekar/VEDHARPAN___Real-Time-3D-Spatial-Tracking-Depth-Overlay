@@ -20,6 +20,9 @@ export class MechaController {
         });
 
         // Add physics body to world
+        // Mecha is Group 4, only collides with Environment (Group 1)
+        this.body.collisionFilterGroup = 4;
+        this.body.collisionFilterMask = 1;
         this.physicsWorld.world.addBody(this.body);
         this.physicsWorld.dynamicBodies.push({ mesh: this.mesh, body: this.body });
 
@@ -116,8 +119,8 @@ export class MechaController {
         if (now - this.lastShotTime < cooldown) return;
         this.lastShotTime = now;
 
-        // Gun barrel position (approximate, local to mecha)
-        const barrelLocalPos = new THREE.Vector3(0, 1.2, 0.5);
+        // Gun barrel position (approximate, local to mecha). Pushed out further to Z=1.5 to prevent visual clipping.
+        const barrelLocalPos = new THREE.Vector3(0, 1.4, 2.0);
         const barrelPos = barrelLocalPos.applyMatrix4(this.mesh.matrixWorld);
 
         // Direction: camera forward projected onto XZ, includes Y pitch

@@ -802,10 +802,10 @@ class DioramaScene {
      * @param {number} fireMode - 1=Plasma, 2=Rapid, 3=Spread, 4=Charged
      */
     spawnProjectile(position, direction, fireMode = 1) {
-        // Tuned stats based on user request (Missile mode is fastest)
-        const speeds = { 1: 30, 2: 40, 3: 65, 4: 15 };
+        // Tuned stats based on user request (Missile mode is fastest, Grenade is heaviest)
+        const speeds = { 1: 30, 2: 40, 3: 65, 4: 10 };
         const radii = { 1: 0.22, 2: 0.10, 3: 0.16, 4: 0.55 };
-        const lifetimes = { 1: 3000, 2: 1500, 3: 2500, 4: 5000 };
+        const lifetimes = { 1: 3000, 2: 1500, 3: 2500, 4: 2000 };
         const scores = { 1: 10, 2: 5, 3: 8, 4: 25 };
 
         const speed = speeds[fireMode] ?? 22;
@@ -833,8 +833,13 @@ class DioramaScene {
         this.scene.add(mesh);
 
         const body = this.physicsWorld.addDynamicBody(mesh, 0.5, 'sphere', radius);
+
+        // Projectiles are Group 2, only collide with Environment (Group 1)
+        body.collisionFilterGroup = 2;
+        body.collisionFilterMask = 1;
+
         body.velocity.set(direction.x * speed, direction.y * speed, direction.z * speed);
-        body.linearDamping = fireMode === 4 ? 0.2 : 0.0; // charged shot has drag
+        body.linearDamping = fireMode === 4 ? 0.6 : 0.0; // charged grenade has heavy air drag
 
         // Modes 1, 2, 3 fly in a straight laser line — neutralize gravity
         if (fireMode !== 4) {
