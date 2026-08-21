@@ -25,14 +25,15 @@ export class MechaController {
 
         this.speed = 4.0;
         this.jumpForce = 7.0;
-        this.canJump = false;
+        this.canJump = true; // allow first jump once grounded
 
         this.aimTarget = new THREE.Vector3();
 
-        // Collision listener for jumping
+        // Collision listener for jumping — reset canJump when landing
         this.body.addEventListener("collide", (e) => {
             const contact = e.contact;
-            if (contact.ni.y > 0.5) {
+            // ni points from bj→bi; check both signs since role of bi/bj varies
+            if (Math.abs(contact.ni.y) > 0.5) {
                 this.canJump = true;
             }
         });
@@ -81,15 +82,22 @@ export class MechaController {
             this.canJump = false;
         }
 
-        // Aiming: face the aim target when right-click is held
-        if (inputManager.aimActive && inputManager.aimTarget) {
-            this.aimTarget.copy(inputManager.aimTarget);
-            const lookAtVec = new THREE.Vector3().copy(this.aimTarget);
-            lookAtVec.y = this.mesh.position.y;
-            const m = new THREE.Matrix4();
-            m.lookAt(this.mesh.position, lookAtVec, new THREE.Vector3(0, 1, 0));
-            const targetQuat = new THREE.Quaternion().setFromRotationMatrix(m);
-            this.body.quaternion.slerp(new CANNON.Quaternion(targetQuat.x, targetQuat.y, targetQuat.z, targetQuat.w), 0.1);
+        // Aiming mode (right-click held): snap mecha to face camera forward (COD-style)
+        if (inputManager.aimActive) {
+            // Build a look direction from the camera's current forward in XZ plane
+            const camForward = new THREE.Vector3(0, 0, 1).applyQuaternion(this.camera.quaternion);
+            camForward.y = 0;
+            if (camForward.lengthSq() > 0.001) {
+                camForward.normalize();
+                // Aim target = mecha pos + far point along camera forward
+                this.aimTarget.copy(this.mesh.position).add(camForward.multiplyScalar(30));
+                const lookAtVec = this.aimTarget.clone();
+                lookAtVec.y = this.mesh.position.y;
+                const m = new THREE.Matrix4();
+                m.lookAt(this.mesh.position, lookAtVec, new THREE.Vector3(0, 1, 0));
+                const targetQuat = new THREE.Quaternion().setFromRotationMatrix(m);
+                this.body.quaternion.slerp(new CANNON.Quaternion(targetQuat.x, targetQuat.y, targetQuat.z, targetQuat.w), 0.2);
+            }
         }
 
         // Shoot on left-click (always, not just when aiming)

@@ -208,17 +208,19 @@ class DioramaScene {
             }
         });
 
-
         // Mouse controls: Free Roam = drag orbit, other modes = pointer-lock look
         this.renderer.domElement.addEventListener('mousedown', (e) => {
             if (e.button === 2 && this.gameState === 'playing') {
-                // Right-click hold → enter Aiming View
+                // Right-click hold → Aiming View
                 if (this.cameraMode !== 3) {
                     this.previousCameraMode = this.cameraMode;
                     this.cameraMode = 3;
                     if (this.hudCameraMode) this.hudCameraMode.textContent = this.cameraModeNames[3];
-                    this._applyPointerLock();
                 }
+                // Green aiming crosshair
+                const xhair = document.getElementById('crosshair');
+                if (xhair) xhair.classList.add('aiming');
+                this._applyPointerLock();
             } else if (e.button === 0 && this.cameraMode === 0) {
                 // Free Roam left-click drag
                 this.isDragging = true;
@@ -233,8 +235,11 @@ class DioramaScene {
                     this.cameraMode = this.previousCameraMode;
                     if (this.hudCameraMode) this.hudCameraMode.textContent = this.cameraModeNames[this.cameraMode];
                     this.previousCameraMode = undefined;
-                    this._applyPointerLock();
                 }
+                // Revert crosshair to white
+                const xhair = document.getElementById('crosshair');
+                if (xhair) xhair.classList.remove('aiming');
+                this._applyPointerLock();
             } else {
                 this.isDragging = false;
             }
@@ -243,10 +248,11 @@ class DioramaScene {
         this.renderer.domElement.addEventListener('mousemove', (e) => {
             const sensitivity = 0.003;
             if (this.cameraMode !== 0 && this.gameState === 'playing') {
-                // Non-free-roam: movementX/Y always works, with or without pointer lock
+                // movementX/Y works without pointer lock too, but pointer lock removes edge limits
                 this.orbitYaw -= e.movementX * sensitivity;
                 this.orbitPitch -= e.movementY * sensitivity;
                 this.orbitPitch = Math.max(-Math.PI / 2 + 0.05, Math.min(Math.PI / 2 - 0.05, this.orbitPitch));
+                // orbitYaw is intentionally NOT clamped — wraps freely for 360°
             } else if (this.isDragging && this.cameraMode === 0) {
                 // Free Roam: click-drag orbit
                 const deltaX = e.offsetX - this.previousMousePosition.x;
@@ -260,7 +266,7 @@ class DioramaScene {
 
         this.renderer.domElement.addEventListener('mouseleave', () => { this.isDragging = false; });
 
-        // Click canvas when not locked to re-acquire pointer lock (non-free-roam)
+        // Click canvas to request Pointer Lock (enables unbounded movementX/Y)
         this.renderer.domElement.addEventListener('click', () => {
             if (this.gameState === 'playing' && this.cameraMode !== 0) {
                 this.renderer.domElement.requestPointerLock();

@@ -21,13 +21,8 @@ html {
     width: 100vw;
     height: 100vh;
     background-color: #000000;
-    /* High-tech crosshair cursor for Free Roam */
-    cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='32' height='32' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='7' fill='none' stroke='%2300ffcc' stroke-width='1.5' opacity='0.9'/%3E%3Cline x1='16' y1='2' x2='16' y2='11' stroke='%2300ffcc' stroke-width='1.5' opacity='0.9'/%3E%3Cline x1='16' y1='21' x2='16' y2='30' stroke='%2300ffcc' stroke-width='1.5' opacity='0.9'/%3E%3Cline x1='2' y1='16' x2='11' y2='16' stroke='%2300ffcc' stroke-width='1.5' opacity='0.9'/%3E%3Cline x1='21' y1='16' x2='30' y2='16' stroke='%2300ffcc' stroke-width='1.5' opacity='0.9'/%3E%3C/svg%3E") 16 16, crosshair;
-}
-
-/* Hide cursor when pointer is locked (non-free-roam modes) */
-#viewport:not(:hover) {
     cursor: none;
+    /* cursor always hidden — HUD crosshair is used instead */
 }
 
 
@@ -116,39 +111,59 @@ html {
     gap: 8px;
 }
 
-/* Crosshair */
+/* Crosshair — tactical reticle */
 #crosshair {
     position: absolute;
     top: 50%;
     left: 50%;
-    width: 20px;
-    height: 20px;
+    width: 32px;
+    height: 32px;
     transform: translate(-50%, -50%);
     pointer-events: none;
-    z-index: 10;
-    opacity: 0.8;
+    z-index: 100;
 }
 
-#crosshair::before,
+/* Circle ring */
+#crosshair::before {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 18px;
+    height: 18px;
+    transform: translate(-50%, -50%);
+    border-radius: 50%;
+    border: 1.5px solid rgba(255, 255, 255, 0.6);
+    transition: border-color 0.1s, box-shadow 0.1s;
+}
+
+/* Centre dot */
 #crosshair::after {
     content: '';
     position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 3px;
+    height: 3px;
+    transform: translate(-50%, -50%);
+    border-radius: 50%;
     background: rgba(255, 255, 255, 0.8);
+    transition: background 0.1s;
 }
 
-#crosshair::before {
-    top: 9px;
-    left: 0;
-    width: 20px;
-    height: 2px;
+/* Aiming state — bright green COD-style */
+#crosshair.aiming::before {
+    border-color: #00ff66;
+    box-shadow: 0 0 6px #00ff66;
+    width: 22px;
+    height: 22px;
 }
 
-#crosshair::after {
-    top: 0;
-    left: 9px;
-    width: 2px;
-    height: 20px;
+#crosshair.aiming::after {
+    background: #00ff66;
+    box-shadow: 0 0 4px #00ff66;
 }
+
 
 .hidden {
     display: none !important;
