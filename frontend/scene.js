@@ -300,38 +300,96 @@ class DioramaScene {
             }
         });
 
-        // Fire mode HUD label update
+        // ── Fire Mode Label ────────────────────────────────────────
         const fireModeNames = { 1: 'PLASMA', 2: 'RAPID', 3: 'MISSILE', 4: 'GRENADE' };
         const fireModeColors = { 1: '#9933ff', 2: '#ff8800', 3: '#ff5500', 4: '#ff0000' };
+
+        // ── Ammo Meters ────────────────────────────────────────────
+        // Cache DOM refs
+        const meterEls = {};
+        [1, 2, 3, 4].forEach(m => {
+            const card = document.getElementById(`meter-${m}`);
+            if (!card) return;
+            meterEls[m] = {
+                card,
+                fill: card.querySelector('.meter-fill'),
+                count: card.querySelector('.meter-count'),
+            };
+        });
+
+        // Track per-mode cooldown rAF handles so they can be cancelled cleanly
+        const cooldownRAF = {};
+
+        function setMeterState(mode, rounds, max, isReloading, cooldownMs) {
+            const m = meterEls[mode];
+            if (!m) return;
+
+            // Cancel any running cooldown animation for this mode
+            if (cooldownRAF[mode]) { cancelAnimationFrame(cooldownRAF[mode]); cooldownRAF[mode] = null; }
+
+            if (isReloading) {
+                m.card.classList.add('cooling');
+                m.count.textContent = '⏳';
+                m.fill.style.width = '0%';
+
+                // Animate fill from 0→100% over cooldownMs
+                const start = performance.now();
+                function animateCooldown() {
+                    const pct = Math.min((performance.now() - start) / cooldownMs, 1);
+                    m.fill.style.width = `${pct * 100}%`;
+                    if (pct < 1) {
+                        cooldownRAF[mode] = requestAnimationFrame(animateCooldown);
+                    }
+                    // The actual ammo restore is handled by mecha_controller; this is visual only
+                }
+                cooldownRAF[mode] = requestAnimationFrame(animateCooldown);
+            } else {
+                m.card.classList.remove('cooling');
+                const pct = max > 0 ? rounds / max : 1;
+                m.fill.style.width = `${pct * 100}%`;
+                m.count.textContent = `${rounds}/${max}`;
+            }
+        }
+
         window.addEventListener('fireModeChanged', (e) => {
+            const mode = e.detail;
+            // Update label
             const el = document.getElementById('fire-mode-name');
             if (el) {
-                el.textContent = fireModeNames[e.detail] ?? 'PLASMA';
-                el.style.color = fireModeColors[e.detail] ?? '#9933ff';
+                el.textContent = fireModeNames[mode] ?? 'PLASMA';
+                el.style.color = fireModeColors[mode] ?? '#9933ff';
             }
-            // Immediately sync ammo HUD to new mode's state on switch
+            // Toggle active class on meter cards
+            [1, 2, 3, 4].forEach(m => meterEls[m]?.card.classList.toggle('active', m === mode));
+            // Sync ammo HUD immediately
             const mc = this.mechaController;
-            if (mc && mc.ammo && mc.ammo[e.detail]) {
-                const a = mc.ammo[e.detail];
+            if (mc?.ammo?.[mode]) {
+                const a = mc.ammo[mode];
                 window.dispatchEvent(new CustomEvent('ammoUpdate', {
-                    detail: { mode: e.detail, rounds: a.rounds, max: a.max, isReloading: a.isReloading }
+                    detail: { mode, rounds: a.rounds, max: a.max, isReloading: a.isReloading, cooldownMs: a.cooldownMs }
                 }));
             }
         });
 
-        // Ammo HUD update
+        // Ammo text HUD (top bar) + meter bars
         const ammoEl = document.getElementById('ammo');
         window.addEventListener('ammoUpdate', ({ detail: d }) => {
-            if (!ammoEl) return;
-            if (d.isReloading) {
-                ammoEl.textContent = '\ud83d\udd01 COOLING…';
-                ammoEl.style.color = '#ff4444';
-            } else {
-                const pct = d.rounds / d.max;
-                ammoEl.textContent = `${d.rounds}/${d.max}`;
-                ammoEl.style.color = pct <= 0.2 ? '#ffaa00' : '#ffffff';
+            // Text HUD
+            if (ammoEl) {
+                if (d.isReloading) {
+                    ammoEl.textContent = '🔁 COOLING…';
+                    ammoEl.style.color = '#ff4444';
+                } else {
+                    ammoEl.textContent = `${d.rounds}/${d.max}`;
+                    ammoEl.style.color = d.rounds / d.max <= 0.2 ? '#ffaa00' : '#ffffff';
+                }
             }
+            // Meter bar
+            setMeterState(d.mode, d.rounds, d.max, d.isReloading, d.cooldownMs ?? 60000);
         });
+
+        // Highlight mode 1 as default active on load
+        meterEls[1]?.card.classList.add('active');
 
         // 8. Connect to WebSocket Telemetry Server
         this.connectTelemetry();

@@ -121,7 +121,7 @@ export class MechaController {
                 a.isReloading = false;
                 a.rounds = a.max;
                 window.dispatchEvent(new CustomEvent('ammoUpdate', {
-                    detail: { mode: m, rounds: a.rounds, max: a.max, isReloading: false }
+                    detail: { mode: m, rounds: a.rounds, max: a.max, isReloading: false, cooldownMs: a.cooldownMs }
                 }));
             }
         });
@@ -153,7 +153,7 @@ export class MechaController {
 
         // Broadcast ammo state to HUD
         window.dispatchEvent(new CustomEvent('ammoUpdate', {
-            detail: { mode: fireMode, rounds: a.rounds, max: a.max, isReloading: a.isReloading }
+            detail: { mode: fireMode, rounds: a.rounds, max: a.max, isReloading: a.isReloading, cooldownMs: a.cooldownMs }
         }));
 
         // Gun barrel position (approximate, local to mecha). Pushed out further to Z=1.5 to prevent visual clipping.
