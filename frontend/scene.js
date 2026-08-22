@@ -309,6 +309,14 @@ class DioramaScene {
                 el.textContent = fireModeNames[e.detail] ?? 'PLASMA';
                 el.style.color = fireModeColors[e.detail] ?? '#9933ff';
             }
+            // Immediately sync ammo HUD to new mode's state on switch
+            const mc = this.mechaController;
+            if (mc && mc.ammo && mc.ammo[e.detail]) {
+                const a = mc.ammo[e.detail];
+                window.dispatchEvent(new CustomEvent('ammoUpdate', {
+                    detail: { mode: e.detail, rounds: a.rounds, max: a.max, isReloading: a.isReloading }
+                }));
+            }
         });
 
         // Ammo HUD update
