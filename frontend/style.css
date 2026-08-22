@@ -254,9 +254,29 @@ html {
     min-width: 160px;
 }
 
-.ammo-meter.active {
-    border-color: rgba(255, 255, 255, 0.4);
-    box-shadow: 0 0 12px rgba(255, 255, 255, 0.12);
+/* Per-mode active border highlight */
+.ammo-meter[data-mode="1"].active {
+    border-color: #9933ff;
+    box-shadow: 0 0 14px rgba(153, 51, 255, 0.45);
+}
+
+.ammo-meter[data-mode="2"].active {
+    border-color: #ff8800;
+    box-shadow: 0 0 14px rgba(255, 136, 0, 0.45);
+}
+
+.ammo-meter[data-mode="3"].active {
+    border-color: #00aaff;
+    box-shadow: 0 0 14px rgba(0, 170, 255, 0.45);
+}
+
+.ammo-meter[data-mode="4"].active {
+    border-color: #ff2222;
+    box-shadow: 0 0 14px rgba(255, 34, 34, 0.45);
+}
+
+.ammo-meter.active .meter-label {
+    color: #fff;
 }
 
 .meter-label {
