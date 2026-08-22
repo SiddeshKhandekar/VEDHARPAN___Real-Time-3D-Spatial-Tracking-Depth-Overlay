@@ -305,7 +305,6 @@ class DioramaScene {
         const fireModeColors = { 1: '#9933ff', 2: '#ff8800', 3: '#ff5500', 4: '#ff0000' };
 
         // ── Ammo Meters ────────────────────────────────────────────
-        // Cache DOM refs
         const meterEls = {};
         [1, 2, 3, 4].forEach(m => {
             const card = document.getElementById(`meter-${m}`);
@@ -314,17 +313,22 @@ class DioramaScene {
                 card,
                 fill: card.querySelector('.meter-fill'),
                 count: card.querySelector('.meter-count'),
+                timer: card.querySelector('.meter-timer'),
             };
         });
 
-        // Track per-mode cooldown rAF handles so they can be cancelled cleanly
         const cooldownRAF = {};
+
+        function fmtTime(ms) {
+            const s = Math.ceil(ms / 1000);
+            const m = Math.floor(s / 60), r = s % 60;
+            return m > 0 ? `${m}:${String(r).padStart(2, '0')}` : `${r}s`;
+        }
 
         function setMeterState(mode, rounds, max, isReloading, cooldownMs) {
             const m = meterEls[mode];
             if (!m) return;
 
-            // Cancel any running cooldown animation for this mode
             if (cooldownRAF[mode]) { cancelAnimationFrame(cooldownRAF[mode]); cooldownRAF[mode] = null; }
 
             if (isReloading) {
@@ -332,36 +336,31 @@ class DioramaScene {
                 m.count.textContent = '⏳';
                 m.fill.style.width = '0%';
 
-                // Animate fill from 0→100% over cooldownMs
                 const start = performance.now();
                 function animateCooldown() {
-                    const pct = Math.min((performance.now() - start) / cooldownMs, 1);
+                    const elapsed = performance.now() - start;
+                    const pct = Math.min(elapsed / cooldownMs, 1);
                     m.fill.style.width = `${pct * 100}%`;
-                    if (pct < 1) {
-                        cooldownRAF[mode] = requestAnimationFrame(animateCooldown);
-                    }
-                    // The actual ammo restore is handled by mecha_controller; this is visual only
+                    m.timer.textContent = pct < 1 ? `⏱ ${fmtTime(cooldownMs - elapsed)}` : '';
+                    if (pct < 1) cooldownRAF[mode] = requestAnimationFrame(animateCooldown);
                 }
                 cooldownRAF[mode] = requestAnimationFrame(animateCooldown);
             } else {
                 m.card.classList.remove('cooling');
-                const pct = max > 0 ? rounds / max : 1;
-                m.fill.style.width = `${pct * 100}%`;
+                m.fill.style.width = `${max > 0 ? (rounds / max) * 100 : 100}%`;
                 m.count.textContent = `${rounds}/${max}`;
+                m.timer.textContent = '';
             }
         }
 
         window.addEventListener('fireModeChanged', (e) => {
             const mode = e.detail;
-            // Update label
             const el = document.getElementById('fire-mode-name');
             if (el) {
                 el.textContent = fireModeNames[mode] ?? 'PLASMA';
                 el.style.color = fireModeColors[mode] ?? '#9933ff';
             }
-            // Toggle active class on meter cards
             [1, 2, 3, 4].forEach(m => meterEls[m]?.card.classList.toggle('active', m === mode));
-            // Sync ammo HUD immediately
             const mc = this.mechaController;
             if (mc?.ammo?.[mode]) {
                 const a = mc.ammo[mode];
@@ -371,20 +370,7 @@ class DioramaScene {
             }
         });
 
-        // Ammo text HUD (top bar) + meter bars
-        const ammoEl = document.getElementById('ammo');
         window.addEventListener('ammoUpdate', ({ detail: d }) => {
-            // Text HUD
-            if (ammoEl) {
-                if (d.isReloading) {
-                    ammoEl.textContent = '🔁 COOLING…';
-                    ammoEl.style.color = '#ff4444';
-                } else {
-                    ammoEl.textContent = `${d.rounds}/${d.max}`;
-                    ammoEl.style.color = d.rounds / d.max <= 0.2 ? '#ffaa00' : '#ffffff';
-                }
-            }
-            // Meter bar
             setMeterState(d.mode, d.rounds, d.max, d.isReloading, d.cooldownMs ?? 60000);
         });
 
