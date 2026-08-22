@@ -227,3 +227,99 @@ html {
 .menu-btn:active {
     transform: translateY(0);
 }
+
+/* ── Ammo Meters Panel ───────────────────────────────────────── */
+#ammo-meters {
+    position: absolute;
+    bottom: 24px;
+    right: 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    z-index: 10;
+    pointer-events: none;
+    user-select: none;
+}
+
+.ammo-meter {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 8px 12px;
+    background: rgba(0, 0, 0, 0.55);
+    border-radius: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    backdrop-filter: blur(8px);
+    transition: border-color 0.2s, box-shadow 0.2s;
+    min-width: 160px;
+}
+
+.ammo-meter.active {
+    border-color: rgba(255, 255, 255, 0.4);
+    box-shadow: 0 0 12px rgba(255, 255, 255, 0.12);
+}
+
+.meter-label {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    display: flex;
+    justify-content: space-between;
+    color: rgba(255, 255, 255, 0.6);
+}
+
+.ammo-meter.active .meter-label {
+    color: #fff;
+}
+
+.meter-count {
+    font-weight: 400;
+    color: rgba(255, 255, 255, 0.5);
+}
+
+.meter-track {
+    height: 6px;
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 3px;
+    overflow: hidden;
+}
+
+.meter-fill {
+    height: 100%;
+    border-radius: 3px;
+    transition: width 0.08s linear, background-color 0.3s;
+}
+
+#meter-1 .meter-fill {
+    background: #9933ff;
+}
+
+#meter-2 .meter-fill {
+    background: #ff8800;
+}
+
+#meter-3 .meter-fill {
+    background: #00aaff;
+}
+
+#meter-4 .meter-fill {
+    background: #ff2222;
+}
+
+.ammo-meter.cooling .meter-fill {
+    background: rgba(255, 255, 255, 0.25) !important;
+    animation: cooldown-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes cooldown-pulse {
+
+    0%,
+    100% {
+        opacity: 0.6;
+    }
+
+    50% {
+        opacity: 1.0;
+    }
+}
