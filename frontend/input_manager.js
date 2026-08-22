@@ -33,6 +33,9 @@ export class InputManager {
 
         this.raycaster = new THREE.Raycaster();
 
+        // Edge-detection: true only on the frame the button is first pressed
+        this._mouseJustPressed = false;
+
         this._initListeners();
     }
 
@@ -57,7 +60,7 @@ export class InputManager {
         });
 
         this.domElement.addEventListener('mousedown', (e) => {
-            if (e.button === 0) this.mouseState.left = true;
+            if (e.button === 0) { this.mouseState.left = true; this._mouseJustPressed = true; }
             if (e.button === 2) this.mouseState.right = true;
         });
 
@@ -96,7 +99,11 @@ export class InputManager {
         } else {
             // Fallback to mouse
             this.aimActive = this.mouseState.right;
-            this.isShooting = this.mouseState.left;
+            // Mode 2 (Rapid) = hold to fire continuously; all others = single click per shot
+            this.isShooting = (this.fireMode === 2)
+                ? this.mouseState.left
+                : this._mouseJustPressed;
+            this._mouseJustPressed = false; // consumed — clear every frame
 
             if (this.aimActive || this.isShooting) {
                 // Determine raycast origin: (0,0) in pointer lock modes, else real mousePos

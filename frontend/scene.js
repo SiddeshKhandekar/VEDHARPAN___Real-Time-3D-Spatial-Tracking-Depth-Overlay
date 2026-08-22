@@ -311,6 +311,20 @@ class DioramaScene {
             }
         });
 
+        // Ammo HUD update
+        const ammoEl = document.getElementById('ammo');
+        window.addEventListener('ammoUpdate', ({ detail: d }) => {
+            if (!ammoEl) return;
+            if (d.isReloading) {
+                ammoEl.textContent = '\ud83d\udd01 COOLING…';
+                ammoEl.style.color = '#ff4444';
+            } else {
+                const pct = d.rounds / d.max;
+                ammoEl.textContent = `${d.rounds}/${d.max}`;
+                ammoEl.style.color = pct <= 0.2 ? '#ffaa00' : '#ffffff';
+            }
+        });
+
         // 8. Connect to WebSocket Telemetry Server
         this.connectTelemetry();
 

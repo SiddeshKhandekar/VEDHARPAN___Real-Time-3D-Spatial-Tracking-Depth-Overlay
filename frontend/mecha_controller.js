@@ -43,6 +43,14 @@ export class MechaController {
 
         this.lastShotTime = 0;
         this.shootCooldown = 200; // ms
+
+        // Per-mode ammo pool and cooldown (rounds / cooldownMs)
+        const MAX = { 1: 15, 2: 200, 3: 10, 4: 2 };
+        const CD = { 1: 120000, 2: 40000, 3: 60000, 4: 180000 };
+        this.ammo = {};
+        [1, 2, 3, 4].forEach(m => {
+            this.ammo[m] = { rounds: MAX[m], max: MAX[m], cooldownMs: CD[m], reloadEnd: 0, isReloading: false };
+        });
     }
 
     update(inputManager, dt) {
@@ -105,6 +113,19 @@ export class MechaController {
             this.aimTarget.copy(inputManager.aimTarget);
         }
 
+        // Tick cooldowns — restore ammo when timer expires
+        const now = performance.now();
+        [1, 2, 3, 4].forEach(m => {
+            const a = this.ammo[m];
+            if (a.isReloading && now >= a.reloadEnd) {
+                a.isReloading = false;
+                a.rounds = a.max;
+                window.dispatchEvent(new CustomEvent('ammoUpdate', {
+                    detail: { mode: m, rounds: a.rounds, max: a.max, isReloading: false }
+                }));
+            }
+        });
+
         // Shoot on left-click (always, not just when aiming)
         if (inputManager.isShooting) {
             this.shoot(inputManager.fireMode || 1);
@@ -113,11 +134,27 @@ export class MechaController {
 
     shoot(fireMode = 1) {
         const now = performance.now();
-        // Cooldown varies per mode
-        const cooldowns = { 1: 250, 2: 80, 3: 350, 4: 800 };
-        const cooldown = cooldowns[fireMode] ?? 250;
-        if (now - this.lastShotTime < cooldown) return;
+        // Per-shot fire rate limiter (still needed for rapid auto)
+        const firerate = { 1: 250, 2: 80, 3: 350, 4: 800 };
+        if (now - this.lastShotTime < (firerate[fireMode] ?? 250)) return;
+
+        // Ammo check
+        const a = this.ammo[fireMode];
+        if (!a || a.isReloading || a.rounds <= 0) return;
+
         this.lastShotTime = now;
+        a.rounds--;
+
+        // Trigger cooldown when the last round is fired
+        if (a.rounds === 0) {
+            a.isReloading = true;
+            a.reloadEnd = now + a.cooldownMs;
+        }
+
+        // Broadcast ammo state to HUD
+        window.dispatchEvent(new CustomEvent('ammoUpdate', {
+            detail: { mode: fireMode, rounds: a.rounds, max: a.max, isReloading: a.isReloading }
+        }));
 
         // Gun barrel position (approximate, local to mecha). Pushed out further to Z=1.5 to prevent visual clipping.
         const barrelLocalPos = new THREE.Vector3(0, 1.4, 2.0);
