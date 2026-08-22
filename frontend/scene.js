@@ -300,16 +300,80 @@ class DioramaScene {
             }
         });
 
-        // Fire mode HUD label update
+        // ── Fire Mode Label ────────────────────────────────────────
         const fireModeNames = { 1: 'PLASMA', 2: 'RAPID', 3: 'MISSILE', 4: 'GRENADE' };
         const fireModeColors = { 1: '#9933ff', 2: '#ff8800', 3: '#ff5500', 4: '#ff0000' };
+
+        // ── Ammo Meters ────────────────────────────────────────────
+        const meterEls = {};
+        [1, 2, 3, 4].forEach(m => {
+            const card = document.getElementById(`meter-${m}`);
+            if (!card) return;
+            meterEls[m] = {
+                card,
+                fill: card.querySelector('.meter-fill'),
+                count: card.querySelector('.meter-count'),
+            };
+        });
+
+        const cooldownRAF = {};
+
+        function fmtTime(ms) {
+            const s = Math.ceil(ms / 1000);
+            const m = Math.floor(s / 60), r = s % 60;
+            return m > 0 ? `${m}:${String(r).padStart(2, '0')}` : `${r}s`;
+        }
+
+        function setMeterState(mode, rounds, max, isReloading, cooldownMs) {
+            const m = meterEls[mode];
+            if (!m) return;
+
+            if (cooldownRAF[mode]) { cancelAnimationFrame(cooldownRAF[mode]); cooldownRAF[mode] = null; }
+
+            if (isReloading) {
+                m.card.classList.add('cooling');
+                m.count.textContent = '⏳';
+                m.fill.style.width = '0%';
+
+                const start = performance.now();
+                function animateCooldown() {
+                    const elapsed = performance.now() - start;
+                    const pct = Math.min(elapsed / cooldownMs, 1);
+                    m.fill.style.width = `${pct * 100}%`;
+                    m.count.textContent = pct < 1 ? `⏱ ${fmtTime(cooldownMs - elapsed)}` : '';
+                    if (pct < 1) cooldownRAF[mode] = requestAnimationFrame(animateCooldown);
+                }
+                cooldownRAF[mode] = requestAnimationFrame(animateCooldown);
+            } else {
+                m.card.classList.remove('cooling');
+                m.fill.style.width = `${max > 0 ? (rounds / max) * 100 : 100}%`;
+                m.count.textContent = `${rounds}/${max}`;
+            }
+        }
+
         window.addEventListener('fireModeChanged', (e) => {
+            const mode = e.detail;
             const el = document.getElementById('fire-mode-name');
             if (el) {
-                el.textContent = fireModeNames[e.detail] ?? 'PLASMA';
-                el.style.color = fireModeColors[e.detail] ?? '#9933ff';
+                el.textContent = fireModeNames[mode] ?? 'PLASMA';
+                el.style.color = fireModeColors[mode] ?? '#9933ff';
+            }
+            [1, 2, 3, 4].forEach(m => meterEls[m]?.card.classList.toggle('active', m === mode));
+            const mc = this.mechaController;
+            if (mc?.ammo?.[mode]) {
+                const a = mc.ammo[mode];
+                window.dispatchEvent(new CustomEvent('ammoUpdate', {
+                    detail: { mode, rounds: a.rounds, max: a.max, isReloading: a.isReloading, cooldownMs: a.cooldownMs }
+                }));
             }
         });
+
+        window.addEventListener('ammoUpdate', ({ detail: d }) => {
+            setMeterState(d.mode, d.rounds, d.max, d.isReloading, d.cooldownMs ?? 60000);
+        });
+
+        // Highlight mode 1 as default active on load
+        meterEls[1]?.card.classList.add('active');
 
         // 8. Connect to WebSocket Telemetry Server
         this.connectTelemetry();
