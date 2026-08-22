@@ -313,7 +313,6 @@ class DioramaScene {
                 card,
                 fill: card.querySelector('.meter-fill'),
                 count: card.querySelector('.meter-count'),
-                timer: card.querySelector('.meter-timer'),
             };
         });
 
@@ -341,7 +340,7 @@ class DioramaScene {
                     const elapsed = performance.now() - start;
                     const pct = Math.min(elapsed / cooldownMs, 1);
                     m.fill.style.width = `${pct * 100}%`;
-                    m.timer.textContent = pct < 1 ? `⏱ ${fmtTime(cooldownMs - elapsed)}` : '';
+                    m.count.textContent = pct < 1 ? `⏱ ${fmtTime(cooldownMs - elapsed)}` : '';
                     if (pct < 1) cooldownRAF[mode] = requestAnimationFrame(animateCooldown);
                 }
                 cooldownRAF[mode] = requestAnimationFrame(animateCooldown);
@@ -349,7 +348,6 @@ class DioramaScene {
                 m.card.classList.remove('cooling');
                 m.fill.style.width = `${max > 0 ? (rounds / max) * 100 : 100}%`;
                 m.count.textContent = `${rounds}/${max}`;
-                m.timer.textContent = '';
             }
         }
 

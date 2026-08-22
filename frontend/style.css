@@ -307,16 +307,6 @@ html {
     background: #ff2222;
 }
 
-.meter-timer {
-    font-size: 9px;
-    font-weight: 600;
-    letter-spacing: 1px;
-    color: #ff6666;
-    text-align: right;
-    display: block;
-    min-height: 12px;
-    transition: opacity 0.2s;
-}
 
 .ammo-meter.cooling .meter-fill {
     background: rgba(255, 255, 255, 0.25) !important;
