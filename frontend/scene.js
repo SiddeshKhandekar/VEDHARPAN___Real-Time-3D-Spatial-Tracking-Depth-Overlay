@@ -4,6 +4,7 @@ import { PhysicsWorld } from './physics_world.js';
 import { InputManager } from './input_manager.js';
 import { VisualEffects } from './effects.js';
 import { MechaController } from './mecha_controller.js';
+import { SettingsManager, ACTIONS } from './settings.js';
 
 /**
  * VEDHARPAN Phase 2: Three.js Viewport & Shadow Physics Engine
@@ -91,6 +92,7 @@ class DioramaScene {
         this.lastTime = performance.now();
 
         // Boot system
+        this.settingsManager = new SettingsManager();
         this.init();
     }
 
@@ -172,11 +174,23 @@ class DioramaScene {
             });
         }
 
+        // ── Settings Panel wiring ────────────────────────────────────────────
+        this._initSettingsPanel();
+
         // Camera Mode Toggle (V key) and Numpad Free Roam
         window.addEventListener('keydown', (e) => {
-            // ESC key to toggle Main Menu
+            // ESC key to toggle Main Menu OR close Settings
             if (e.key === 'Escape') {
+                const settingsPanel = document.getElementById('settings-panel');
                 const menu = document.getElementById('main-menu');
+
+                if (!settingsPanel.classList.contains('hidden')) {
+                    // Settings is open — close it, go back to menu
+                    settingsPanel.classList.add('hidden');
+                    menu.classList.remove('hidden');
+                    return;
+                }
+
                 if (menu.classList.contains('hidden')) {
                     // Open Menu
                     menu.classList.remove('hidden');
@@ -382,10 +396,203 @@ class DioramaScene {
         this.physicsWorld = new PhysicsWorld();
 
         this.inputManager = new InputManager(this.camera, this.renderer.domElement);
+        // Apply saved keybindings from SettingsManager immediately
+        this.settingsManager.applyToInputManager(this.inputManager);
         this.effects = new VisualEffects(this.scene);
 
         // 10. Start Rendering Loop
         this.animate();
+    }
+
+    /**
+     * Initialise all Settings Panel interactivity:
+     * • Main tab switching (Graphics / Controls)
+     * • Sub-tab switching (Keyboard / Mouse)
+     * • Keybind table row generation + COD-style key-capture
+     * • Fullscreen toggle
+     * • Save & Close / Restore Defaults
+     */
+    _initSettingsPanel() {
+        const sm = this.settingsManager;
+
+        // ── Open from Main Menu ─────────────────────────────────────────
+        const btnOptions = document.getElementById('btn-options');
+        if (btnOptions) {
+            btnOptions.addEventListener('click', () => {
+                document.getElementById('main-menu').classList.add('hidden');
+                document.getElementById('settings-panel').classList.remove('hidden');
+                this._renderKeybindRows();
+                // Sync fullscreen toggle state
+                document.getElementById('fullscreen-toggle').checked = sm.graphics.fullscreen;
+            });
+        }
+
+        // ── Close button ───────────────────────────────────────────
+        const closeBtnEl = document.getElementById('settings-close-btn');
+        if (closeBtnEl) {
+            closeBtnEl.addEventListener('click', () => {
+                document.getElementById('settings-panel').classList.add('hidden');
+                document.getElementById('main-menu').classList.remove('hidden');
+            });
+        }
+
+        // ── Main tab switching (Graphics / Controls) ───────────────────
+        document.querySelectorAll('.tab-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+                document.querySelectorAll('.tab-content').forEach(c => c.classList.add('hidden'));
+                btn.classList.add('active');
+                document.getElementById(`tab-${btn.dataset.tab}`).classList.remove('hidden');
+            });
+        });
+
+        // ── Sub-tab switching (Keyboard / Mouse) ────────────────────
+        document.querySelectorAll('.ctrl-tab-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                document.querySelectorAll('.ctrl-tab-btn').forEach(b => b.classList.remove('active'));
+                document.querySelectorAll('.ctrl-content').forEach(c => c.classList.add('hidden'));
+                btn.classList.add('active');
+                document.getElementById(`ctrl-${btn.dataset.ctrl}`).classList.remove('hidden');
+            });
+        });
+
+        // ── Fullscreen toggle ──────────────────────────────────────
+        const fsToggle = document.getElementById('fullscreen-toggle');
+        if (fsToggle) {
+            // Keep in sync if user presses F11 externally
+            document.addEventListener('fullscreenchange', () => {
+                fsToggle.checked = !!document.fullscreenElement;
+                sm.graphics.fullscreen = fsToggle.checked;
+            });
+            fsToggle.addEventListener('change', () => {
+                sm.graphics.fullscreen = fsToggle.checked;
+                sm.applyGraphics();
+            });
+        }
+
+        // ── Save & Close ─────────────────────────────────────────
+        const saveBtn = document.getElementById('settings-save-btn');
+        if (saveBtn) {
+            saveBtn.addEventListener('click', () => {
+                sm.graphics.fullscreen = document.getElementById('fullscreen-toggle').checked;
+                sm.save();
+                sm.applyGraphics();
+                if (this.inputManager) sm.applyToInputManager(this.inputManager);
+                document.getElementById('settings-panel').classList.add('hidden');
+                document.getElementById('main-menu').classList.remove('hidden');
+            });
+        }
+
+        // ── Restore Defaults ──────────────────────────────────────
+        const restoreBtn = document.getElementById('settings-restore-btn');
+        if (restoreBtn) {
+            restoreBtn.addEventListener('click', () => {
+                sm.restoreDefaults();
+                document.getElementById('fullscreen-toggle').checked = false;
+                this._renderKeybindRows();
+                if (this.inputManager) sm.applyToInputManager(this.inputManager);
+            });
+        }
+
+        // Apply saved settings on startup
+        if (this.inputManager) sm.applyToInputManager(this.inputManager);
+        sm.applyGraphics();
+    }
+
+    /**
+     * Build keyboard binding table rows for all three groups.
+     * Called on open and after Restore Defaults.
+     */
+    _renderKeybindRows() {
+        const sm = this.settingsManager;
+        const groups = {
+            'kb-movement-rows': ['moveForward', 'moveBackward', 'moveLeft', 'moveRight', 'jump'],
+            'kb-combat-rows': ['fireMode1', 'fireMode2', 'fireMode3', 'fireMode4'],
+            'kb-system-rows': ['toggleCamera', 'openMenu'],
+        };
+
+        for (const [tbodyId, actionIds] of Object.entries(groups)) {
+            const tbody = document.getElementById(tbodyId);
+            if (!tbody) continue;
+            tbody.innerHTML = '';
+
+            for (const actionId of actionIds) {
+                const def = ACTIONS[actionId];
+                if (!def) continue;
+                const { defaultKey, customKey } = sm.getBinding(actionId);
+                const displayDefault = def.displayDefault ?? defaultKey.toUpperCase();
+                const displayCustom = customKey ? customKey.toUpperCase() : null;
+
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td class="col-action">${def.label}</td>
+                    <td class="col-default"><span class="key-badge">${displayDefault}</span></td>
+                    <td class="col-custom">
+                        <button
+                            class="custom-bind-btn ${displayCustom ? 'assigned' : ''}"
+                            data-action="${actionId}"
+                        >${displayCustom ?? '+ Bind Key'}</button>
+                    </td>
+                `;
+                tbody.appendChild(tr);
+
+                const bindBtn = tr.querySelector('.custom-bind-btn');
+                bindBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    this._startKeyCapture(actionId, bindBtn);
+                });
+            }
+        }
+    }
+
+    /**
+     * Enter key-capture mode for a single bind button.
+     * Listens for the next keydown; ESC cancels, any other key assigns.
+     * Assigned state: button gets .assigned class and shows the key.
+     * On re-click of an already assigned button → clear the custom bind.
+     */
+    _startKeyCapture(actionId, btnEl) {
+        const sm = this.settingsManager;
+
+        // If already assigned, clicking again clears the custom key
+        if (btnEl.classList.contains('assigned')) {
+            sm.clearCustomKey(actionId);
+            btnEl.classList.remove('assigned');
+            btnEl.textContent = '+ Bind Key';
+            return;
+        }
+
+        // Prevent concurrent captures
+        const existingListening = document.querySelector('.custom-bind-btn.listening');
+        if (existingListening) return;
+
+        const prevText = btnEl.textContent;
+        btnEl.classList.add('listening');
+        btnEl.textContent = 'Press a key…';
+
+        const keydownHandler = (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            window.removeEventListener('keydown', keydownHandler, true);
+            btnEl.classList.remove('listening');
+            btnEl.style.pointerEvents = '';
+
+            if (e.key === 'Escape') {
+                // Cancel — revert text
+                btnEl.textContent = prevText;
+                return;
+            }
+
+            const capturedKey = e.key.toLowerCase();
+            sm.setCustomKey(actionId, capturedKey);
+
+            const displayKey = (e.key === ' ') ? 'Space' : e.key.toUpperCase();
+            btnEl.classList.add('assigned');
+            btnEl.textContent = displayKey;
+        };
+
+        // Use capture phase so it fires before other listeners
+        window.addEventListener('keydown', keydownHandler, true);
     }
 
     /**
