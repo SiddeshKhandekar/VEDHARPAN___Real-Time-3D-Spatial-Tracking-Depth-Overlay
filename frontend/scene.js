@@ -135,14 +135,6 @@ class DioramaScene {
         // 7. Event Listeners
         window.addEventListener('resize', () => this.onWindowResize());
 
-        const disconnectBtn = document.getElementById('disconnect-btn');
-        if (disconnectBtn) {
-            disconnectBtn.addEventListener('click', () => {
-                if (this.socket && this.socket.readyState === WebSocket.OPEN) {
-                    this.socket.send(JSON.stringify({ command: "shutdown" }));
-                }
-            });
-        }
 
         // Main Menu Buttons
         const btnStart = document.getElementById('btn-start');
@@ -177,10 +169,16 @@ class DioramaScene {
         // ── Settings Panel wiring ────────────────────────────────────────────
         this._initSettingsPanel();
 
-        // Camera Mode Toggle (V key) and Numpad Free Roam
+        // Resolve top-level actions like Menu, Camera Mode, Respawn
         window.addEventListener('keydown', (e) => {
-            // ESC key to toggle Main Menu OR close Settings
-            if (e.key === 'Escape') {
+            const map = this.settingsManager.buildKeyToActionMap();
+            const action = map[e.key.toLowerCase()] || map[e.code.toLowerCase()];
+            const isEscape = e.key === 'Escape' || action === 'openMenu';
+            const isToggleCam = e.key.toLowerCase() === 'v' || action === 'toggleCamera';
+            const isRespawn = e.key.toLowerCase() === 'n' || action === 'respawn';
+
+            // ESC / Menu Toggle
+            if (isEscape) {
                 const settingsPanel = document.getElementById('settings-panel');
                 const menu = document.getElementById('main-menu');
 
@@ -213,12 +211,19 @@ class DioramaScene {
                 return; // Disable other keystrokes if opening menu
             }
 
-            if (e.key.toLowerCase() === 'v') {
+            if (isToggleCam) {
                 this.cameraMode = (this.cameraMode + 1) % 4;
                 if (this.hudCameraMode) {
                     this.hudCameraMode.textContent = this.cameraModeNames[this.cameraMode];
                 }
                 this._applyPointerLock();
+            }
+
+            if (isRespawn && this.mechaController && this.gameState === 'playing') {
+                // Instantly reset the mecha back to its start position
+                this.mechaController.body.position.set(0, 5, 2);
+                this.mechaController.body.velocity.set(0, 0, 0);
+                this.mechaController.body.angularVelocity.set(0, 0, 0);
             }
 
             // Numpad / Free Roam camera controls (cameraMode === 0)
@@ -230,7 +235,7 @@ class DioramaScene {
                 forward.normalize(); right.normalize();
 
                 // Resolve pressed key to action (covers default AND custom bindings)
-                const map = this.settingsManager.buildKeyToActionMap();
+                // (Already mapped above for system keys, but we grab the local freeRoam map specific to cameraMode 0)
                 const freeRoamAction = map[e.key.toLowerCase()] || map[e.code.toLowerCase()];
 
                 this.isRecentering = false;
@@ -539,7 +544,7 @@ class DioramaScene {
         const groups = {
             'kb-movement-rows': ['moveForward', 'moveBackward', 'moveLeft', 'moveRight', 'jump'],
             'kb-combat-rows': ['fireMode1', 'fireMode2', 'fireMode3', 'fireMode4'],
-            'kb-system-rows': ['toggleCamera', 'openMenu'],
+            'kb-system-rows': ['toggleCamera', 'respawn', 'openMenu'],
             'kb-freeroam-rows': ['freeRoamForward', 'freeRoamBackward', 'freeRoamLeft', 'freeRoamRight', 'camUp', 'camDown', 'freeRoamRecenter'],
         };
 
