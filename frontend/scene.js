@@ -4,6 +4,7 @@ import { PhysicsWorld } from './physics_world.js';
 import { InputManager } from './input_manager.js';
 import { VisualEffects } from './effects.js';
 import { MechaController } from './mecha_controller.js';
+import { SettingsManager, ACTIONS } from './settings.js';
 
 /**
  * VEDHARPAN Phase 2: Three.js Viewport & Shadow Physics Engine
@@ -91,6 +92,7 @@ class DioramaScene {
         this.lastTime = performance.now();
 
         // Boot system
+        this.settingsManager = new SettingsManager();
         this.init();
     }
 
@@ -133,19 +135,11 @@ class DioramaScene {
         // 7. Event Listeners
         window.addEventListener('resize', () => this.onWindowResize());
 
-        const disconnectBtn = document.getElementById('disconnect-btn');
-        if (disconnectBtn) {
-            disconnectBtn.addEventListener('click', () => {
-                if (this.socket && this.socket.readyState === WebSocket.OPEN) {
-                    this.socket.send(JSON.stringify({ command: "shutdown" }));
-                }
-            });
-        }
 
         // Main Menu Buttons
         const btnStart = document.getElementById('btn-start');
         if (btnStart) {
-            btnStart.textContent = "Resume Game / Start Active";
+            btnStart.textContent = "Resume Game";
             btnStart.addEventListener('click', () => {
                 const isFirstStart = !document.getElementById('hud').classList.contains('hidden');
 
@@ -172,11 +166,29 @@ class DioramaScene {
             });
         }
 
-        // Camera Mode Toggle (V key) and Numpad Free Roam
+        // ── Settings Panel wiring ────────────────────────────────────────────
+        this._initSettingsPanel();
+
+        // Resolve top-level actions like Menu, Camera Mode, Respawn
         window.addEventListener('keydown', (e) => {
-            // ESC key to toggle Main Menu
-            if (e.key === 'Escape') {
+            const map = this.settingsManager.buildKeyToActionMap();
+            const action = map[e.key.toLowerCase()] || map[e.code.toLowerCase()];
+            const isEscape = e.key === 'Escape' || action === 'openMenu';
+            const isToggleCam = e.key.toLowerCase() === 'v' || action === 'toggleCamera';
+            const isRespawn = e.key.toLowerCase() === 'n' || action === 'respawn';
+
+            // ESC / Menu Toggle
+            if (isEscape) {
+                const settingsPanel = document.getElementById('settings-panel');
                 const menu = document.getElementById('main-menu');
+
+                if (!settingsPanel.classList.contains('hidden')) {
+                    // Settings is open — close it, go back to menu
+                    settingsPanel.classList.add('hidden');
+                    menu.classList.remove('hidden');
+                    return;
+                }
+
                 if (menu.classList.contains('hidden')) {
                     // Open Menu
                     menu.classList.remove('hidden');
@@ -199,7 +211,7 @@ class DioramaScene {
                 return; // Disable other keystrokes if opening menu
             }
 
-            if (e.key.toLowerCase() === 'v') {
+            if (isToggleCam) {
                 this.cameraMode = (this.cameraMode + 1) % 4;
                 if (this.hudCameraMode) {
                     this.hudCameraMode.textContent = this.cameraModeNames[this.cameraMode];
@@ -207,7 +219,14 @@ class DioramaScene {
                 this._applyPointerLock();
             }
 
-            // Numpad controls for Free Roam (cameraMode === 0)
+            if (isRespawn && this.mechaController && this.gameState === 'playing') {
+                // Instantly reset the mecha back to its start position
+                this.mechaController.body.position.set(0, 5, 2);
+                this.mechaController.body.velocity.set(0, 0, 0);
+                this.mechaController.body.angularVelocity.set(0, 0, 0);
+            }
+
+            // Numpad / Free Roam camera controls (cameraMode === 0)
             if (this.cameraMode === 0 && this.gameState === 'playing') {
                 const moveSpeed = 0.8;
                 const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion);
@@ -215,21 +234,32 @@ class DioramaScene {
                 forward.y = 0; right.y = 0;
                 forward.normalize(); right.normalize();
 
+                // Resolve pressed key to action (covers default AND custom bindings)
+                // (Already mapped above for system keys, but we grab the local freeRoam map specific to cameraMode 0)
+                const freeRoamAction = map[e.key.toLowerCase()] || map[e.code.toLowerCase()];
+
                 this.isRecentering = false;
 
-                if (e.key === '8' || e.code === 'Numpad8') {
+                if (e.key === '8' || e.code === 'Numpad8' || freeRoamAction === 'freeRoamForward') {
                     this.freeRoamOffset.add(forward.multiplyScalar(moveSpeed));
                 }
-                if (e.key === '2' || e.code === 'Numpad2') {
+                if (e.key === '2' || e.code === 'Numpad2' || freeRoamAction === 'freeRoamBackward') {
                     this.freeRoamOffset.sub(forward.multiplyScalar(moveSpeed));
                 }
-                if (e.key === '4' || e.code === 'Numpad4') {
+                if (e.key === '4' || e.code === 'Numpad4' || freeRoamAction === 'freeRoamLeft') {
                     this.freeRoamOffset.sub(right.multiplyScalar(moveSpeed));
                 }
-                if (e.key === '6' || e.code === 'Numpad6') {
+                if (e.key === '6' || e.code === 'Numpad6' || freeRoamAction === 'freeRoamRight') {
                     this.freeRoamOffset.add(right.multiplyScalar(moveSpeed));
                 }
-                if (e.key === '5' || e.code === 'Numpad5') {
+                // Camera Up (Num7) / Camera Down (Num9)
+                if (e.key === '7' || e.code === 'Numpad7' || freeRoamAction === 'camUp') {
+                    this.freeRoamOffset.y += moveSpeed;
+                }
+                if (e.key === '9' || e.code === 'Numpad9' || freeRoamAction === 'camDown') {
+                    this.freeRoamOffset.y -= moveSpeed;
+                }
+                if (e.key === '5' || e.code === 'Numpad5' || freeRoamAction === 'freeRoamRecenter') {
                     this.isRecentering = true;
                 }
             }
@@ -274,18 +304,20 @@ class DioramaScene {
 
         this.renderer.domElement.addEventListener('mousemove', (e) => {
             const sensitivity = 0.003;
+            // Invert Y-axis multiplier from settings
+            const pitchDir = this.settingsManager.graphics.invertMouse ? 1 : -1;
             if (this.cameraMode !== 0 && this.gameState === 'playing') {
                 // movementX/Y works without pointer lock too, but pointer lock removes edge limits
                 this.orbitYaw -= e.movementX * sensitivity;
-                this.orbitPitch -= e.movementY * sensitivity;
+                this.orbitPitch += pitchDir * e.movementY * sensitivity;
                 this.orbitPitch = Math.max(-Math.PI / 2 + 0.05, Math.min(Math.PI / 2 - 0.05, this.orbitPitch));
-                // orbitYaw is intentionally NOT clamped — wraps freely for 360°
+                // orbitYaw is intentionally NOT clamped — wraps freely for 360 degrees
             } else if (this.isDragging && this.cameraMode === 0) {
                 // Free Roam: click-drag orbit
                 const deltaX = e.offsetX - this.previousMousePosition.x;
                 const deltaY = e.offsetY - this.previousMousePosition.y;
                 this.orbitYaw -= deltaX * 0.005;
-                this.orbitPitch -= deltaY * 0.005;
+                this.orbitPitch += pitchDir * deltaY * 0.005;
                 this.orbitPitch = Math.max(-Math.PI / 2 + 0.1, Math.min(Math.PI / 2 - 0.1, this.orbitPitch));
                 this.previousMousePosition = { x: e.offsetX, y: e.offsetY };
             }
@@ -382,10 +414,222 @@ class DioramaScene {
         this.physicsWorld = new PhysicsWorld();
 
         this.inputManager = new InputManager(this.camera, this.renderer.domElement);
+        // Apply saved keybindings from SettingsManager immediately
+        this.settingsManager.applyToInputManager(this.inputManager);
         this.effects = new VisualEffects(this.scene);
 
         // 10. Start Rendering Loop
         this.animate();
+    }
+
+    /**
+     * Initialise all Settings Panel interactivity:
+     * • Main tab switching (Graphics / Controls)
+     * • Sub-tab switching (Keyboard / Mouse)
+     * • Keybind table row generation + COD-style key-capture
+     * • Fullscreen toggle
+     * • Save & Close / Restore Defaults
+     */
+    _initSettingsPanel() {
+        const sm = this.settingsManager;
+
+        // ── Open from Main Menu ─────────────────────────────────────────
+        const btnOptions = document.getElementById('btn-options');
+        if (btnOptions) {
+            btnOptions.addEventListener('click', () => {
+                document.getElementById('main-menu').classList.add('hidden');
+                document.getElementById('settings-panel').classList.remove('hidden');
+                this._renderKeybindRows();
+                // Sync fullscreen toggle state
+                document.getElementById('fullscreen-toggle').checked = sm.graphics.fullscreen;
+            });
+        }
+
+        // ── Close button ───────────────────────────────────────────
+        const closeBtnEl = document.getElementById('settings-close-btn');
+        if (closeBtnEl) {
+            closeBtnEl.addEventListener('click', () => {
+                document.getElementById('settings-panel').classList.add('hidden');
+                document.getElementById('main-menu').classList.remove('hidden');
+            });
+        }
+
+        // ── Main tab switching (Graphics / Controls) ───────────────────
+        document.querySelectorAll('.tab-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+                document.querySelectorAll('.tab-content').forEach(c => c.classList.add('hidden'));
+                btn.classList.add('active');
+                document.getElementById(`tab-${btn.dataset.tab}`).classList.remove('hidden');
+            });
+        });
+
+        // ── Sub-tab switching (Keyboard / Mouse) ────────────────────
+        document.querySelectorAll('.ctrl-tab-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                document.querySelectorAll('.ctrl-tab-btn').forEach(b => b.classList.remove('active'));
+                document.querySelectorAll('.ctrl-content').forEach(c => c.classList.add('hidden'));
+                btn.classList.add('active');
+                document.getElementById(`ctrl-${btn.dataset.ctrl}`).classList.remove('hidden');
+            });
+        });
+
+        // ── Fullscreen toggle ──────────────────────────────────────
+        const fsToggle = document.getElementById('fullscreen-toggle');
+        if (fsToggle) {
+            // Keep in sync if user presses F11 externally
+            document.addEventListener('fullscreenchange', () => {
+                fsToggle.checked = !!document.fullscreenElement;
+                sm.graphics.fullscreen = fsToggle.checked;
+            });
+            fsToggle.addEventListener('change', () => {
+                sm.graphics.fullscreen = fsToggle.checked;
+                sm.applyGraphics();
+            });
+        }
+
+        // ── Invert Mouse toggle ────────────────────────────────
+        const invertToggle = document.getElementById('invert-mouse-toggle');
+        if (invertToggle) {
+            invertToggle.addEventListener('change', () => {
+                sm.graphics.invertMouse = invertToggle.checked;
+                // Immediate effect — no save needed until Save & Close
+            });
+        }
+
+        // ── Save & Close ─────────────────────────────────────────
+        const saveBtn = document.getElementById('settings-save-btn');
+        if (saveBtn) {
+            saveBtn.addEventListener('click', () => {
+                sm.graphics.fullscreen = document.getElementById('fullscreen-toggle').checked;
+                sm.graphics.invertMouse = document.getElementById('invert-mouse-toggle')?.checked ?? false;
+                sm.save();
+                sm.applyGraphics();
+                if (this.inputManager) sm.applyToInputManager(this.inputManager);
+                document.getElementById('settings-panel').classList.add('hidden');
+                document.getElementById('main-menu').classList.remove('hidden');
+            });
+        }
+
+        // ── Restore Defaults ──────────────────────────────────────
+        const restoreBtn = document.getElementById('settings-restore-btn');
+        if (restoreBtn) {
+            restoreBtn.addEventListener('click', () => {
+                sm.restoreDefaults();
+                document.getElementById('fullscreen-toggle').checked = false;
+                const inv = document.getElementById('invert-mouse-toggle');
+                if (inv) inv.checked = false;
+                this._renderKeybindRows();
+                if (this.inputManager) sm.applyToInputManager(this.inputManager);
+            });
+        }
+
+        // Sync toggle states when opening
+        document.getElementById('fullscreen-toggle').checked = sm.graphics.fullscreen;
+        const invEl = document.getElementById('invert-mouse-toggle');
+        if (invEl) invEl.checked = sm.graphics.invertMouse ?? false;
+
+        // Apply saved settings on startup
+        if (this.inputManager) sm.applyToInputManager(this.inputManager);
+        sm.applyGraphics();
+    }
+
+    /**
+     * Build keyboard binding table rows for all four groups:
+     * Movement, Combat, System, and Free Roam Camera.
+     * Called on open and after Restore Defaults.
+     */
+    _renderKeybindRows() {
+        const sm = this.settingsManager;
+        const groups = {
+            'kb-movement-rows': ['moveForward', 'moveBackward', 'moveLeft', 'moveRight', 'jump'],
+            'kb-combat-rows': ['fireMode1', 'fireMode2', 'fireMode3', 'fireMode4'],
+            'kb-system-rows': ['toggleCamera', 'respawn', 'openMenu'],
+            'kb-freeroam-rows': ['freeRoamForward', 'freeRoamBackward', 'freeRoamLeft', 'freeRoamRight', 'camUp', 'camDown', 'freeRoamRecenter'],
+        };
+
+        for (const [tbodyId, actionIds] of Object.entries(groups)) {
+            const tbody = document.getElementById(tbodyId);
+            if (!tbody) continue;
+            tbody.innerHTML = '';
+
+            for (const actionId of actionIds) {
+                const def = ACTIONS[actionId];
+                if (!def) continue;
+                const { defaultKey, customKey } = sm.getBinding(actionId);
+                const displayDefault = def.displayDefault ?? defaultKey.toUpperCase();
+                const displayCustom = customKey ? customKey.toUpperCase() : null;
+
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td class="col-action">${def.label}</td>
+                    <td class="col-default"><span class="key-badge">${displayDefault}</span></td>
+                    <td class="col-custom">
+                        <button
+                            class="custom-bind-btn ${displayCustom ? 'assigned' : ''}"
+                            data-action="${actionId}"
+                        >${displayCustom ?? '+ Bind Key'}</button>
+                    </td>
+                `;
+                tbody.appendChild(tr);
+
+                const bindBtn = tr.querySelector('.custom-bind-btn');
+                bindBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    this._startKeyCapture(actionId, bindBtn);
+                });
+            }
+        }
+    }
+
+    /**
+     * Enter key-capture mode for a single bind button.
+     * Listens for the next keydown; ESC cancels, any other key assigns.
+     * Assigned state: button gets .assigned class and shows the key.
+     * On re-click of an already assigned button → clear the custom bind.
+     */
+    _startKeyCapture(actionId, btnEl) {
+        const sm = this.settingsManager;
+
+        // If already assigned, clicking again clears the custom key
+        if (btnEl.classList.contains('assigned')) {
+            sm.clearCustomKey(actionId);
+            btnEl.classList.remove('assigned');
+            btnEl.textContent = '+ Bind Key';
+            return;
+        }
+
+        // Prevent concurrent captures
+        const existingListening = document.querySelector('.custom-bind-btn.listening');
+        if (existingListening) return;
+
+        const prevText = btnEl.textContent;
+        btnEl.classList.add('listening');
+        btnEl.textContent = 'Press a key…';
+
+        const keydownHandler = (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            window.removeEventListener('keydown', keydownHandler, true);
+            btnEl.classList.remove('listening');
+            btnEl.style.pointerEvents = '';
+
+            if (e.key === 'Escape') {
+                // Cancel — revert text
+                btnEl.textContent = prevText;
+                return;
+            }
+
+            const capturedKey = e.key.toLowerCase();
+            sm.setCustomKey(actionId, capturedKey);
+
+            const displayKey = (e.key === ' ') ? 'Space' : e.key.toUpperCase();
+            btnEl.classList.add('assigned');
+            btnEl.textContent = displayKey;
+        };
+
+        // Use capture phase so it fires before other listeners
+        window.addEventListener('keydown', keydownHandler, true);
     }
 
     /**
@@ -566,13 +810,20 @@ class DioramaScene {
                 loader.load(
                     `${assetPath}mecha.glb`,
                     (gltf) => {
+                        this.mechaWrapper = new THREE.Group();
+                        this.mechaWrapper.position.set(0, 5, 2);
+                        this.scene.add(this.mechaWrapper);
+
                         this.mechaModel = gltf.scene;
-                        // Position on the bottom of the stairs (Z=0).
-                        this.mechaModel.position.set(0, 5, 2);
-                        this.mechaModel.rotation.set(0, Math.PI, 0);
+                        // Remove Math.PI rotation so it naturally faces its forward movement vector natively
+                        this.mechaModel.rotation.set(0, 0, 0);
                         this.mechaModel.scale.set(0.6, 0.6, 0.6);
+                        // Visually raise the mesh even higher so feet clear the geometry completely
+                        this.mechaModel.position.set(0, 2.35, 0);
+
                         configureShadows(this.mechaModel, true, true);
-                        this.scene.add(this.mechaModel);
+                        this.mechaWrapper.add(this.mechaModel);
+
                         console.log('Loaded: Centerpiece Mecha');
 
                         // Initialize controller
@@ -580,7 +831,7 @@ class DioramaScene {
                             this.scene,
                             this.physicsWorld,
                             this.camera,
-                            this.mechaModel,
+                            this.mechaWrapper,
                             this.effects,
                             (pos, dir, mode) => this.spawnProjectile(pos, dir, mode)
                         );
@@ -993,10 +1244,10 @@ class DioramaScene {
                     const pitchQuat = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), this.orbitPitch);
                     const orbitQuat = yawQuat.multiply(pitchQuat);
 
-                    const offset = new THREE.Vector3(0, 2, -6).applyQuaternion(orbitQuat);
+                    const offset = new THREE.Vector3(0, 4.35, -6).applyQuaternion(orbitQuat);
                     const targetCamPos = mechaPos.clone().add(offset);
                     this.camera.position.lerp(targetCamPos, 0.12);
-                    this.camera.lookAt(mechaPos.clone().add(new THREE.Vector3(0, 1.5, 0)));
+                    this.camera.lookAt(mechaPos.clone().add(new THREE.Vector3(0, 3.85, 0)));
                     this.camera.clearViewOffset();
                 }
                 break;
@@ -1009,7 +1260,7 @@ class DioramaScene {
                     const pitchQuat = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), this.orbitPitch);
                     const orbitQuat = yawQuat.multiply(pitchQuat);
 
-                    const headOffset = new THREE.Vector3(0, 1.8, 0.3).applyQuaternion(orbitQuat);
+                    const headOffset = new THREE.Vector3(0, 4.15, 0.3).applyQuaternion(orbitQuat);
                     const targetCamPos = mechaPos.clone().add(headOffset);
                     this.camera.position.copy(targetCamPos);
 
@@ -1027,7 +1278,7 @@ class DioramaScene {
                     const pitchQuat = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), this.orbitPitch);
                     const orbitQuat = yawQuat.multiply(pitchQuat);
 
-                    const shoulderOffset = new THREE.Vector3(0.8, 1.8, -2.8).applyQuaternion(orbitQuat);
+                    const shoulderOffset = new THREE.Vector3(0.8, 4.15, -2.8).applyQuaternion(orbitQuat);
                     const targetCamPos = mechaPos.clone().add(shoulderOffset);
                     this.camera.position.lerp(targetCamPos, 0.18);
 

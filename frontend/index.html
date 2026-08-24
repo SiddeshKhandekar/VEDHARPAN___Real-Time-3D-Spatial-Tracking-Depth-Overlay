@@ -6,6 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>VEDHARPAN 3D Viewport</title>
     <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="settings_panel.css">
 
     <!-- ES Module Import Map for Three.js and loaders -->
     <script type="importmap">
@@ -30,13 +31,13 @@
         <div class="hud-item">Head: <span id="head-coords">x: 0.00, y: 0.00, z: 0.00</span></div>
         <div class="hud-item">Hands: <span id="hands-coords">0 detected</span></div>
         <div class="hud-item">Camera: <span id="camera-mode">Free Roam</span></div>
-        <button id="disconnect-btn" class="hud-item disconnect-btn">Disconnect & Close</button>
+
     </div>
 
     <!-- Game HUD -->
     <div id="game-hud">
-        <div class="game-hud-item">❤️ <span id="health">100</span></div>
-        <div class="game-hud-item">🏆 <span id="score">0</span></div>
+        <div class="game-hud-item">&#x2764;&#xFE0F; <span id="health">100</span></div>
+        <div class="game-hud-item">&#x1F3C6; <span id="score">0</span></div>
     </div>
 
     <!-- Crosshair -->
@@ -46,13 +47,214 @@
     <div id="main-menu" class="main-menu hidden">
         <h1 class="game-title">VEDHARPAN</h1>
         <div class="menu-buttons">
-            <button id="btn-start" class="menu-btn">Start Game</button>
+            <button id="btn-start" class="menu-btn">Resume Game</button>
             <button id="btn-options" class="menu-btn">Settings</button>
             <button id="btn-quit" class="menu-btn">Quit</button>
         </div>
     </div>
 
+    <!-- ================================================================
+         SETTINGS PANEL
+    ================================================================ -->
+    <div id="settings-panel" class="hidden">
 
+        <!-- Header -->
+        <div class="settings-header">
+            <span class="settings-title">&#x2699; SETTINGS</span>
+            <button id="settings-close-btn" class="settings-close-btn" title="Back to Menu">&#x2715;</button>
+        </div>
+
+        <!-- Main Tab Bar: Graphics | Controls -->
+        <div class="settings-tabs">
+            <button class="tab-btn active" data-tab="graphics">
+                &#x1F5A5; Graphics
+            </button>
+            <button class="tab-btn" data-tab="controls">
+                &#x1F3AE; Controls
+            </button>
+        </div>
+
+        <!-- GRAPHICS TAB -->
+        <div class="tab-content" id="tab-graphics">
+            <div class="settings-section">
+                <div class="settings-section-header">Display</div>
+
+                <div class="setting-row">
+                    <div class="setting-info">
+                        <span class="setting-label">Display Mode</span>
+                        <span class="setting-desc">Switch between windowed and fullscreen rendering.</span>
+                    </div>
+                    <div class="toggle-row">
+                        <span class="toggle-label" id="lbl-windowed">Windowed</span>
+                        <label class="toggle-switch" title="Toggle Fullscreen">
+                            <input type="checkbox" id="fullscreen-toggle">
+                            <span class="slider"></span>
+                        </label>
+                        <span class="toggle-label" id="lbl-fullscreen">Fullscreen</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="settings-hint">
+                &#x1F4A1; Tip: You can also press <kbd>F11</kbd> in most browsers for fullscreen.
+            </div>
+        </div>
+
+        <!-- CONTROLS TAB -->
+        <div class="tab-content hidden" id="tab-controls">
+
+            <!-- Sub-tabs: Keyboard | Mouse -->
+            <div class="ctrl-tabs">
+                <button class="ctrl-tab-btn active" data-ctrl="keyboard">
+                    &#x2328; Keyboard
+                </button>
+                <button class="ctrl-tab-btn" data-ctrl="mouse">
+                    &#x1F5B1; Mouse
+                </button>
+            </div>
+
+            <!-- KEYBOARD SUB-TAB -->
+            <div class="ctrl-content" id="ctrl-keyboard">
+
+                <div class="settings-section">
+                    <div class="settings-section-header">Movement</div>
+                    <table class="keybind-table">
+                        <thead>
+                            <tr>
+                                <th class="col-action">Action</th>
+                                <th class="col-default">Default Key</th>
+                                <th class="col-custom">Custom Bind</th>
+                            </tr>
+                        </thead>
+                        <tbody id="kb-movement-rows"></tbody>
+                    </table>
+                </div>
+
+                <div class="settings-section">
+                    <div class="settings-section-header">Combat</div>
+                    <table class="keybind-table">
+                        <thead>
+                            <tr>
+                                <th class="col-action">Action</th>
+                                <th class="col-default">Default Key</th>
+                                <th class="col-custom">Custom Bind</th>
+                            </tr>
+                        </thead>
+                        <tbody id="kb-combat-rows"></tbody>
+                    </table>
+                </div>
+
+                <div class="settings-section">
+                    <div class="settings-section-header">System</div>
+                    <table class="keybind-table">
+                        <thead>
+                            <tr>
+                                <th class="col-action">Action</th>
+                                <th class="col-default">Default Key</th>
+                                <th class="col-custom">Custom Bind</th>
+                            </tr>
+                        </thead>
+                        <tbody id="kb-system-rows"></tbody>
+                    </table>
+                </div>
+
+                <div class="settings-section">
+                    <div class="settings-section-header">Free Roam Camera</div>
+                    <table class="keybind-table">
+                        <thead>
+                            <tr>
+                                <th class="col-action">Action</th>
+                                <th class="col-default">Default Key</th>
+                                <th class="col-custom">Custom Bind</th>
+                            </tr>
+                        </thead>
+                        <tbody id="kb-freeroam-rows"></tbody>
+                    </table>
+                </div>
+
+                <div class="settings-hint">
+                    &#x1F4A1; Click a <strong>Custom Bind</strong> button, then press any key to assign it.
+                    Both the default and custom key will trigger the action simultaneously.
+                </div>
+            </div>
+
+            <!-- MOUSE SUB-TAB -->
+            <div class="ctrl-content hidden" id="ctrl-mouse">
+                <div class="settings-section">
+                    <div class="settings-section-header">Mouse Options</div>
+                    <div class="setting-row">
+                        <div class="setting-info">
+                            <div class="setting-label">Invert Y Axis</div>
+                            <div class="setting-desc">Reverses the vertical camera movement when looking around.</div>
+                        </div>
+                        <div class="toggle-row">
+                            <span class="toggle-label" id="lbl-normal">Normal</span>
+                            <label class="toggle-switch">
+                                <input type="checkbox" id="invert-mouse-toggle">
+                                <span class="slider"></span>
+                            </label>
+                            <span class="toggle-label" id="lbl-inverted">Inverted</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="settings-section">
+                    <div class="settings-section-header">Mouse Bindings</div>
+                    <table class="keybind-table">
+                        <thead>
+                            <tr>
+                                <th class="col-action">Action</th>
+                                <th class="col-default">Assigned Button</th>
+                                <th class="col-custom">Notes</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td class="col-action">Fire Weapon</td>
+                                <td><span class="key-badge">Left Click</span></td>
+                                <td class="mouse-note">Click or hold (Rapid mode)</td>
+                            </tr>
+                            <tr>
+                                <td class="col-action">Aim / Zoom</td>
+                                <td><span class="key-badge">Right Click</span></td>
+                                <td class="mouse-note">Hold to enter Aiming View</td>
+                            </tr>
+                            <tr>
+                                <td class="col-action">Camera Look</td>
+                                <td><span class="key-badge">Mouse Move</span></td>
+                                <td class="mouse-note">Active in 3rd / 1st Person modes</td>
+                            </tr>
+                            <tr>
+                                <td class="col-action">Cycle Fire Mode</td>
+                                <td><span class="key-badge">Scroll Wheel</span></td>
+                                <td class="mouse-note">Cycles Plasma &#x2192; Rapid &#x2192; Missile &#x2192; Grenade
+                                </td>
+                            </tr>
+                            <tr>
+                                <td class="col-action">Free Roam Orbit</td>
+                                <td><span class="key-badge">Left Drag</span></td>
+                                <td class="mouse-note">Click-drag in Free Roam camera mode</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+                <div class="settings-hint">
+                    &#x1F5B1; Mouse bindings are fixed by the browser pointer-lock API and cannot be rebound.
+                </div>
+            </div>
+        </div>
+
+        <!-- Footer -->
+        <div class="settings-footer">
+            <button id="settings-restore-btn" class="settings-btn settings-btn-secondary">
+                &#x21BA; Restore Defaults
+            </button>
+            <button id="settings-save-btn" class="settings-btn settings-btn-primary">
+                &#x2714; Save &amp; Close
+            </button>
+        </div>
+
+    </div>
 
     <!-- Ammo Meters Panel (bottom-right) -->
     <div id="ammo-meters">

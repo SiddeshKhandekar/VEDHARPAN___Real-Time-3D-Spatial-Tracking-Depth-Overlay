@@ -156,8 +156,10 @@ export class MechaController {
             detail: { mode: fireMode, rounds: a.rounds, max: a.max, isReloading: a.isReloading, cooldownMs: a.cooldownMs }
         }));
 
-        // Gun barrel position (approximate, local to mecha). Pushed out further to Z=1.5 to prevent visual clipping.
-        const barrelLocalPos = new THREE.Vector3(0, 1.4, 2.0);
+        // Gun barrel position (approximate, local to mecha).
+        // Since we wrapped the mecha in an unscaled Group and raised it 2.35 units visually,
+        // we adjust the Y spawn point up linearly to match the new visual barrels.
+        const barrelLocalPos = new THREE.Vector3(0, 3.35, 2.0);
         const barrelPos = barrelLocalPos.applyMatrix4(this.mesh.matrixWorld);
 
         // Direction: camera forward projected onto XZ, includes Y pitch
