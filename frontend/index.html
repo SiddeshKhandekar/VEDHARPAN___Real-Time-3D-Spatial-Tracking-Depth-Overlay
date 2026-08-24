@@ -158,6 +158,20 @@
                     </table>
                 </div>
 
+                <div class="settings-section">
+                    <div class="settings-section-header">Free Roam Camera</div>
+                    <table class="keybind-table">
+                        <thead>
+                            <tr>
+                                <th class="col-action">Action</th>
+                                <th class="col-default">Default Key</th>
+                                <th class="col-custom">Custom Bind</th>
+                            </tr>
+                        </thead>
+                        <tbody id="kb-freeroam-rows"></tbody>
+                    </table>
+                </div>
+
                 <div class="settings-hint">
                     &#x1F4A1; Click a <strong>Custom Bind</strong> button, then press any key to assign it.
                     Both the default and custom key will trigger the action simultaneously.
@@ -166,6 +180,24 @@
 
             <!-- MOUSE SUB-TAB -->
             <div class="ctrl-content hidden" id="ctrl-mouse">
+                <div class="settings-section">
+                    <div class="settings-section-header">Mouse Options</div>
+                    <div class="setting-row">
+                        <div class="setting-info">
+                            <div class="setting-label">Invert Y Axis</div>
+                            <div class="setting-desc">Reverses the vertical camera movement when looking around.</div>
+                        </div>
+                        <div class="toggle-row">
+                            <span class="toggle-label" id="lbl-normal">Normal</span>
+                            <label class="toggle-switch">
+                                <input type="checkbox" id="invert-mouse-toggle">
+                                <span class="slider"></span>
+                            </label>
+                            <span class="toggle-label" id="lbl-inverted">Inverted</span>
+                        </div>
+                    </div>
+                </div>
+
                 <div class="settings-section">
                     <div class="settings-section-header">Mouse Bindings</div>
                     <table class="keybind-table">

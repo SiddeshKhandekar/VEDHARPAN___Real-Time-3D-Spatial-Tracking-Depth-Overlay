@@ -221,7 +221,7 @@ class DioramaScene {
                 this._applyPointerLock();
             }
 
-            // Numpad controls for Free Roam (cameraMode === 0)
+            // Numpad / Free Roam camera controls (cameraMode === 0)
             if (this.cameraMode === 0 && this.gameState === 'playing') {
                 const moveSpeed = 0.8;
                 const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion);
@@ -229,21 +229,31 @@ class DioramaScene {
                 forward.y = 0; right.y = 0;
                 forward.normalize(); right.normalize();
 
+                // Resolve pressed key to action (covers default AND custom bindings)
+                const freeRoamAction = this.settingsManager.buildKeyToActionMap()[e.key.toLowerCase()];
+
                 this.isRecentering = false;
 
-                if (e.key === '8' || e.code === 'Numpad8') {
+                if (e.key === '8' || e.code === 'Numpad8' || freeRoamAction === 'freeRoamForward') {
                     this.freeRoamOffset.add(forward.multiplyScalar(moveSpeed));
                 }
-                if (e.key === '2' || e.code === 'Numpad2') {
+                if (e.key === '2' || e.code === 'Numpad2' || freeRoamAction === 'freeRoamBackward') {
                     this.freeRoamOffset.sub(forward.multiplyScalar(moveSpeed));
                 }
-                if (e.key === '4' || e.code === 'Numpad4') {
+                if (e.key === '4' || e.code === 'Numpad4' || freeRoamAction === 'freeRoamLeft') {
                     this.freeRoamOffset.sub(right.multiplyScalar(moveSpeed));
                 }
-                if (e.key === '6' || e.code === 'Numpad6') {
+                if (e.key === '6' || e.code === 'Numpad6' || freeRoamAction === 'freeRoamRight') {
                     this.freeRoamOffset.add(right.multiplyScalar(moveSpeed));
                 }
-                if (e.key === '5' || e.code === 'Numpad5') {
+                // Camera Up (Num7) / Camera Down (Num9)
+                if (e.key === '7' || e.code === 'Numpad7' || freeRoamAction === 'camUp') {
+                    this.freeRoamOffset.y += moveSpeed;
+                }
+                if (e.key === '9' || e.code === 'Numpad9' || freeRoamAction === 'camDown') {
+                    this.freeRoamOffset.y -= moveSpeed;
+                }
+                if (e.key === '5' || e.code === 'Numpad5' || freeRoamAction === 'freeRoamRecenter') {
                     this.isRecentering = true;
                 }
             }
@@ -288,18 +298,20 @@ class DioramaScene {
 
         this.renderer.domElement.addEventListener('mousemove', (e) => {
             const sensitivity = 0.003;
+            // Invert Y-axis multiplier from settings
+            const pitchDir = this.settingsManager.graphics.invertMouse ? 1 : -1;
             if (this.cameraMode !== 0 && this.gameState === 'playing') {
                 // movementX/Y works without pointer lock too, but pointer lock removes edge limits
                 this.orbitYaw -= e.movementX * sensitivity;
-                this.orbitPitch -= e.movementY * sensitivity;
+                this.orbitPitch += pitchDir * e.movementY * sensitivity;
                 this.orbitPitch = Math.max(-Math.PI / 2 + 0.05, Math.min(Math.PI / 2 - 0.05, this.orbitPitch));
-                // orbitYaw is intentionally NOT clamped — wraps freely for 360°
+                // orbitYaw is intentionally NOT clamped — wraps freely for 360 degrees
             } else if (this.isDragging && this.cameraMode === 0) {
                 // Free Roam: click-drag orbit
                 const deltaX = e.offsetX - this.previousMousePosition.x;
                 const deltaY = e.offsetY - this.previousMousePosition.y;
                 this.orbitYaw -= deltaX * 0.005;
-                this.orbitPitch -= deltaY * 0.005;
+                this.orbitPitch += pitchDir * deltaY * 0.005;
                 this.orbitPitch = Math.max(-Math.PI / 2 + 0.1, Math.min(Math.PI / 2 - 0.1, this.orbitPitch));
                 this.previousMousePosition = { x: e.offsetX, y: e.offsetY };
             }
@@ -470,11 +482,21 @@ class DioramaScene {
             });
         }
 
+        // ── Invert Mouse toggle ────────────────────────────────
+        const invertToggle = document.getElementById('invert-mouse-toggle');
+        if (invertToggle) {
+            invertToggle.addEventListener('change', () => {
+                sm.graphics.invertMouse = invertToggle.checked;
+                // Immediate effect — no save needed until Save & Close
+            });
+        }
+
         // ── Save & Close ─────────────────────────────────────────
         const saveBtn = document.getElementById('settings-save-btn');
         if (saveBtn) {
             saveBtn.addEventListener('click', () => {
                 sm.graphics.fullscreen = document.getElementById('fullscreen-toggle').checked;
+                sm.graphics.invertMouse = document.getElementById('invert-mouse-toggle')?.checked ?? false;
                 sm.save();
                 sm.applyGraphics();
                 if (this.inputManager) sm.applyToInputManager(this.inputManager);
@@ -489,10 +511,17 @@ class DioramaScene {
             restoreBtn.addEventListener('click', () => {
                 sm.restoreDefaults();
                 document.getElementById('fullscreen-toggle').checked = false;
+                const inv = document.getElementById('invert-mouse-toggle');
+                if (inv) inv.checked = false;
                 this._renderKeybindRows();
                 if (this.inputManager) sm.applyToInputManager(this.inputManager);
             });
         }
+
+        // Sync toggle states when opening
+        document.getElementById('fullscreen-toggle').checked = sm.graphics.fullscreen;
+        const invEl = document.getElementById('invert-mouse-toggle');
+        if (invEl) invEl.checked = sm.graphics.invertMouse ?? false;
 
         // Apply saved settings on startup
         if (this.inputManager) sm.applyToInputManager(this.inputManager);
@@ -500,7 +529,8 @@ class DioramaScene {
     }
 
     /**
-     * Build keyboard binding table rows for all three groups.
+     * Build keyboard binding table rows for all four groups:
+     * Movement, Combat, System, and Free Roam Camera.
      * Called on open and after Restore Defaults.
      */
     _renderKeybindRows() {
@@ -509,6 +539,7 @@ class DioramaScene {
             'kb-movement-rows': ['moveForward', 'moveBackward', 'moveLeft', 'moveRight', 'jump'],
             'kb-combat-rows': ['fireMode1', 'fireMode2', 'fireMode3', 'fireMode4'],
             'kb-system-rows': ['toggleCamera', 'openMenu'],
+            'kb-freeroam-rows': ['freeRoamForward', 'freeRoamBackward', 'freeRoamLeft', 'freeRoamRight', 'camUp', 'camDown', 'freeRoamRecenter'],
         };
 
         for (const [tbodyId, actionIds] of Object.entries(groups)) {

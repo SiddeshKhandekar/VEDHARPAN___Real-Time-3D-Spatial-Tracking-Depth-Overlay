@@ -235,7 +235,11 @@
 }
 
 /* Active toggle labels brighten */
-#fullscreen-toggle:checked~.toggle-row #lbl-fullscreen {
+.toggle-row:has(input:not(:checked))>span:first-child {
+    color: #4facfe;
+}
+
+.toggle-row:has(input:checked)>span:last-child {
     color: #4facfe;
 }
 
