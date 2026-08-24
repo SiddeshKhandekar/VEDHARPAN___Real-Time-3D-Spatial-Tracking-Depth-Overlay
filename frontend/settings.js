@@ -1,7 +1,7 @@
 /**
  * VEDHARPAN — SettingsManager
  *
- * Manages all user-configurable settings:  Graphics & Control bindings.
+ * Manages all user-configurable settings: Graphics & Control bindings.
  * Settings are persisted to localStorage under the key 'vedharpan_settings'.
  *
  * Key-binding schema:
@@ -12,27 +12,37 @@
  */
 
 export const ACTIONS = {
-    // ── Movement ──────────────────────────────────────────────
+    // ── Movement ──────────────────────────────────────────────────────────
     moveForward: { label: 'Move Forward', group: 'movement', defaultKey: 'w' },
     moveBackward: { label: 'Move Backward', group: 'movement', defaultKey: 's' },
     moveLeft: { label: 'Move Left', group: 'movement', defaultKey: 'a' },
     moveRight: { label: 'Move Right', group: 'movement', defaultKey: 'd' },
     jump: { label: 'Jump', group: 'movement', defaultKey: ' ', displayDefault: 'Space' },
 
-    // ── Combat ────────────────────────────────────────────────
+    // ── Combat ────────────────────────────────────────────────────────────
     fireMode1: { label: 'Fire Mode: Plasma', group: 'combat', defaultKey: '1' },
     fireMode2: { label: 'Fire Mode: Rapid', group: 'combat', defaultKey: '2' },
     fireMode3: { label: 'Fire Mode: Missile', group: 'combat', defaultKey: '3' },
     fireMode4: { label: 'Fire Mode: Grenade', group: 'combat', defaultKey: '4' },
 
-    // ── Camera / System ───────────────────────────────────────
+    // ── Camera / System ───────────────────────────────────────────────────
     toggleCamera: { label: 'Toggle Camera Mode', group: 'system', defaultKey: 'v', displayDefault: 'V' },
     openMenu: { label: 'Open / Close Menu', group: 'system', defaultKey: 'escape', displayDefault: 'Escape' },
+
+    // ── Free Roam Camera (Numpad) ─────────────────────────────────────────
+    freeRoamForward: { label: 'Free Roam: Move Forward', group: 'freeRoam', defaultKey: '8', displayDefault: 'Num 8' },
+    freeRoamBackward: { label: 'Free Roam: Move Backward', group: 'freeRoam', defaultKey: '2', displayDefault: 'Num 2' },
+    freeRoamLeft: { label: 'Free Roam: Strafe Left', group: 'freeRoam', defaultKey: '4', displayDefault: 'Num 4' },
+    freeRoamRight: { label: 'Free Roam: Strafe Right', group: 'freeRoam', defaultKey: '6', displayDefault: 'Num 6' },
+    camUp: { label: 'Free Roam: Camera Up', group: 'freeRoam', defaultKey: '7', displayDefault: 'Num 7' },
+    camDown: { label: 'Free Roam: Camera Down', group: 'freeRoam', defaultKey: '9', displayDefault: 'Num 9' },
+    freeRoamRecenter: { label: 'Free Roam: Recenter', group: 'freeRoam', defaultKey: '5', displayDefault: 'Num 5' },
 };
 
-// ── Default graphics ──────────────────────────────────────────────────────────
+// ── Default graphics / mouse settings ────────────────────────────────────────
 const DEFAULT_GRAPHICS = {
     fullscreen: false,
+    invertMouse: false,
 };
 
 // ── localStorage key ──────────────────────────────────────────────────────────
@@ -42,7 +52,7 @@ export class SettingsManager {
     constructor() {
         this.graphics = { ...DEFAULT_GRAPHICS };
 
-        /** @type {Record<string, string|null>} actionId → customKey (lowercased) */
+        /** @type {Record<string, string|null>} actionId -> customKey (lowercased) */
         this.customKeys = {};
 
         this.load();
@@ -102,9 +112,9 @@ export class SettingsManager {
     }
 
     /**
-     * Build a flat map of {lowercaseKey → actionId} covering
-     * BOTH default and custom keys. Used by InputManager to resolve
-     * any pressed key to an action.
+     * Build a flat map of {lowercaseKey -> actionId} covering
+     * BOTH default and custom keys. Used by InputManager and scene.js
+     * to resolve any pressed key to an action.
      */
     buildKeyToActionMap() {
         const map = {};
