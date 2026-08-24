@@ -147,7 +147,7 @@ class DioramaScene {
         // Main Menu Buttons
         const btnStart = document.getElementById('btn-start');
         if (btnStart) {
-            btnStart.textContent = "Resume Game / Start Active";
+            btnStart.textContent = "Resume Game";
             btnStart.addEventListener('click', () => {
                 const isFirstStart = !document.getElementById('hud').classList.contains('hidden');
 
@@ -230,7 +230,8 @@ class DioramaScene {
                 forward.normalize(); right.normalize();
 
                 // Resolve pressed key to action (covers default AND custom bindings)
-                const freeRoamAction = this.settingsManager.buildKeyToActionMap()[e.key.toLowerCase()];
+                const map = this.settingsManager.buildKeyToActionMap();
+                const freeRoamAction = map[e.key.toLowerCase()] || map[e.code.toLowerCase()];
 
                 this.isRecentering = false;
 

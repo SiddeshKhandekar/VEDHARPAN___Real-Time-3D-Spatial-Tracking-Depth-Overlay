@@ -30,13 +30,13 @@ export const ACTIONS = {
     openMenu: { label: 'Open / Close Menu', group: 'system', defaultKey: 'escape', displayDefault: 'Escape' },
 
     // ── Free Roam Camera (Numpad) ─────────────────────────────────────────
-    freeRoamForward: { label: 'Free Roam: Move Forward', group: 'freeRoam', defaultKey: '8', displayDefault: 'Num 8' },
-    freeRoamBackward: { label: 'Free Roam: Move Backward', group: 'freeRoam', defaultKey: '2', displayDefault: 'Num 2' },
-    freeRoamLeft: { label: 'Free Roam: Strafe Left', group: 'freeRoam', defaultKey: '4', displayDefault: 'Num 4' },
-    freeRoamRight: { label: 'Free Roam: Strafe Right', group: 'freeRoam', defaultKey: '6', displayDefault: 'Num 6' },
-    camUp: { label: 'Free Roam: Camera Up', group: 'freeRoam', defaultKey: '7', displayDefault: 'Num 7' },
-    camDown: { label: 'Free Roam: Camera Down', group: 'freeRoam', defaultKey: '9', displayDefault: 'Num 9' },
-    freeRoamRecenter: { label: 'Free Roam: Recenter', group: 'freeRoam', defaultKey: '5', displayDefault: 'Num 5' },
+    freeRoamForward: { label: 'Free Roam: Move Forward', group: 'freeRoam', defaultKey: 'numpad8', displayDefault: 'Num 8' },
+    freeRoamBackward: { label: 'Free Roam: Move Backward', group: 'freeRoam', defaultKey: 'numpad2', displayDefault: 'Num 2' },
+    freeRoamLeft: { label: 'Free Roam: Strafe Left', group: 'freeRoam', defaultKey: 'numpad4', displayDefault: 'Num 4' },
+    freeRoamRight: { label: 'Free Roam: Strafe Right', group: 'freeRoam', defaultKey: 'numpad6', displayDefault: 'Num 6' },
+    camUp: { label: 'Free Roam: Camera Up', group: 'freeRoam', defaultKey: 'numpad7', displayDefault: 'Num 7' },
+    camDown: { label: 'Free Roam: Camera Down', group: 'freeRoam', defaultKey: 'numpad9', displayDefault: 'Num 9' },
+    freeRoamRecenter: { label: 'Free Roam: Recenter', group: 'freeRoam', defaultKey: 'numpad5', displayDefault: 'Num 5' },
 };
 
 // ── Default graphics / mouse settings ────────────────────────────────────────

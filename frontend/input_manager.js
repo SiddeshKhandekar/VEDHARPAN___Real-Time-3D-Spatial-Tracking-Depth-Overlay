@@ -83,7 +83,8 @@ export class InputManager {
 
     _resolveKeydown(e) {
         const k = e.key.toLowerCase();
-        const action = this._keyToAction[k];
+        const code = e.code.toLowerCase();
+        const action = this._keyToAction[k] || this._keyToAction[code];
 
         // ── Movement ───────────────────────────────────────────
         if (action === 'moveForward') { this.keys['w'] = true; return; }
@@ -103,7 +104,8 @@ export class InputManager {
 
     _resolveKeyup(e) {
         const k = e.key.toLowerCase();
-        const action = this._keyToAction[k];
+        const code = e.code.toLowerCase();
+        const action = this._keyToAction[k] || this._keyToAction[code];
 
         if (action === 'moveForward') { this.keys['w'] = false; }
         if (action === 'moveBackward') { this.keys['s'] = false; }
