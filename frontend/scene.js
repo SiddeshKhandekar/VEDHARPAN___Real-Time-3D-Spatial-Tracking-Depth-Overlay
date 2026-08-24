@@ -810,13 +810,20 @@ class DioramaScene {
                 loader.load(
                     `${assetPath}mecha.glb`,
                     (gltf) => {
+                        this.mechaWrapper = new THREE.Group();
+                        this.mechaWrapper.position.set(0, 5, 2);
+                        this.scene.add(this.mechaWrapper);
+
                         this.mechaModel = gltf.scene;
-                        // Position on the bottom of the stairs (Z=0).
-                        this.mechaModel.position.set(0, 5, 2);
-                        this.mechaModel.rotation.set(0, Math.PI, 0);
+                        // Remove Math.PI rotation so it naturally faces its forward movement vector natively
+                        this.mechaModel.rotation.set(0, 0, 0);
                         this.mechaModel.scale.set(0.6, 0.6, 0.6);
+                        // Visually raise the mesh even higher so feet clear the geometry completely
+                        this.mechaModel.position.set(0, 2.35, 0);
+
                         configureShadows(this.mechaModel, true, true);
-                        this.scene.add(this.mechaModel);
+                        this.mechaWrapper.add(this.mechaModel);
+
                         console.log('Loaded: Centerpiece Mecha');
 
                         // Initialize controller
@@ -824,7 +831,7 @@ class DioramaScene {
                             this.scene,
                             this.physicsWorld,
                             this.camera,
-                            this.mechaModel,
+                            this.mechaWrapper,
                             this.effects,
                             (pos, dir, mode) => this.spawnProjectile(pos, dir, mode)
                         );
@@ -1237,10 +1244,10 @@ class DioramaScene {
                     const pitchQuat = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), this.orbitPitch);
                     const orbitQuat = yawQuat.multiply(pitchQuat);
 
-                    const offset = new THREE.Vector3(0, 2, -6).applyQuaternion(orbitQuat);
+                    const offset = new THREE.Vector3(0, 4.35, -6).applyQuaternion(orbitQuat);
                     const targetCamPos = mechaPos.clone().add(offset);
                     this.camera.position.lerp(targetCamPos, 0.12);
-                    this.camera.lookAt(mechaPos.clone().add(new THREE.Vector3(0, 1.5, 0)));
+                    this.camera.lookAt(mechaPos.clone().add(new THREE.Vector3(0, 3.85, 0)));
                     this.camera.clearViewOffset();
                 }
                 break;
@@ -1253,7 +1260,7 @@ class DioramaScene {
                     const pitchQuat = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), this.orbitPitch);
                     const orbitQuat = yawQuat.multiply(pitchQuat);
 
-                    const headOffset = new THREE.Vector3(0, 1.8, 0.3).applyQuaternion(orbitQuat);
+                    const headOffset = new THREE.Vector3(0, 4.15, 0.3).applyQuaternion(orbitQuat);
                     const targetCamPos = mechaPos.clone().add(headOffset);
                     this.camera.position.copy(targetCamPos);
 
@@ -1271,7 +1278,7 @@ class DioramaScene {
                     const pitchQuat = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), this.orbitPitch);
                     const orbitQuat = yawQuat.multiply(pitchQuat);
 
-                    const shoulderOffset = new THREE.Vector3(0.8, 1.8, -2.8).applyQuaternion(orbitQuat);
+                    const shoulderOffset = new THREE.Vector3(0.8, 4.15, -2.8).applyQuaternion(orbitQuat);
                     const targetCamPos = mechaPos.clone().add(shoulderOffset);
                     this.camera.position.lerp(targetCamPos, 0.18);
 
