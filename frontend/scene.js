@@ -963,6 +963,54 @@ class DioramaScene {
                 console.log('Spawned fallback neon placeholder for City Map.');
             }
         );
+
+        // 6, 7, 8. Load Hovering Building Assets with Accurate Surface Physics
+        const loadHoveringBuilding = (fileName, scale) => {
+            // Randomize placement inside space globe (Radius 500), avoiding the very bottom
+            let pos = new THREE.Vector3();
+            let radius, phi, theta;
+            do {
+                radius = 150 + Math.random() * 250; // Distance from center 150-400
+                phi = Math.random() * Math.PI; // Vertical angle
+                theta = Math.random() * Math.PI * 2; // Horizontal angle
+                pos.x = radius * Math.sin(phi) * Math.cos(theta);
+                pos.y = radius * Math.cos(phi);
+                pos.z = radius * Math.sin(phi) * Math.sin(theta);
+            } while (pos.y < -150); // Avoid the very bottom area where the city map is
+
+            const rotY = Math.random() * Math.PI * 2;
+
+            loader.load(
+                `${assetPath}${fileName}`,
+                (gltf) => {
+                    const building = gltf.scene;
+                    building.position.copy(pos);
+                    building.scale.set(scale, scale, scale);
+                    building.rotation.y = rotY;
+
+                    // Ensure world matrices are computed before passing to physics
+                    building.updateMatrixWorld(true);
+
+                    // Add trimesh physics to each mesh in the building to ensure
+                    // it does not move and has surface-level collision accuracy.
+                    building.traverse((child) => {
+                        if (child.isMesh) {
+                            this.physicsWorld.addStaticTrimesh(child);
+                        }
+                    });
+
+                    configureShadows(building, true, true);
+                    this.scene.add(building);
+                    console.log(`Loaded hovering asset at (${pos.x.toFixed(0)}, ${pos.y.toFixed(0)}, ${pos.z.toFixed(0)}): ${fileName}`);
+                },
+                undefined,
+                (error) => console.error(`Error loading physics building ${fileName}:`, error)
+            );
+        };
+
+        loadHoveringBuilding('building.glb', 1.0);
+        loadHoveringBuilding('brutalist_building.glb', 1.0);
+        loadHoveringBuilding('brutalist_building_1.glb', 1.0);
     }
 
     /**
