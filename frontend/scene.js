@@ -956,8 +956,18 @@ class DioramaScene {
             }
         );
 
-        // 6, 7, 8. Load Hovering Building Assets with Accurate Surface Physics
-        const loadHoveringBuilding = (fileName, pos, scale) => {
+        const loadHoveringBuilding = (fileName, scale) => {
+            // Broad distribution pushing the massive structures to the horizon lengths
+            let pos = new THREE.Vector3();
+            let distance;
+            do {
+                pos.x = -250 + Math.random() * 500;
+                pos.z = -250 + Math.random() * 500;
+                distance = Math.sqrt(pos.x * pos.x + pos.z * pos.z); // Lateral distance from the center platform
+            } while (distance < 80); // Ensure they don't spawn directly over the center bridge
+
+            pos.y = 40 + Math.random() * 60; // Keep them towering overhead
+
             const rotY = Math.random() * Math.PI * 2;
 
             loader.load(
@@ -995,10 +1005,10 @@ class DioramaScene {
                 (error) => console.error(`Error loading physics building ${fileName}:`, error)
             );
         };
-        // Massively scaled up to match the Mecha's size, distributed uniquely across the sky
-        loadHoveringBuilding('building.glb', new THREE.Vector3(-150, 40, -100), 10.0);
-        loadHoveringBuilding('brutalist_building.glb', new THREE.Vector3(120, 80, -120), 10.0);
-        loadHoveringBuilding('brutalist_building_1.glb', new THREE.Vector3(50, 110, 180), 10.0);
+        // Pass solely the filename and a massive unified scale 
+        loadHoveringBuilding('building.glb', 10.0);
+        loadHoveringBuilding('brutalist_building.glb', 10.0);
+        loadHoveringBuilding('brutalist_building_1.glb', 10.0);
     }
 
     /**
