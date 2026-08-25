@@ -73,7 +73,7 @@ html {
 /* Game HUD */
 #game-hud {
     position: absolute;
-    bottom: 30px;
+    bottom: 20px;
     left: 50%;
     transform: translateX(-50%);
     display: flex;
@@ -216,7 +216,7 @@ html {
 /* ── Defensive Shield Meter ──────────────────────────────────── */
 #shield-meter-container {
     position: absolute;
-    bottom: 12px;
+    bottom: 6px;
     left: 50%;
     transform: translateX(-50%);
     width: 320px;
