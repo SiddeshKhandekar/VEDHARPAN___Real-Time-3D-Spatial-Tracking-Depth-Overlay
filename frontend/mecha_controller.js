@@ -51,6 +51,72 @@ export class MechaController {
         [1, 2, 3, 4].forEach(m => {
             this.ammo[m] = { rounds: MAX[m], max: MAX[m], cooldownMs: CD[m], reloadEnd: 0, isReloading: false };
         });
+
+        // ── Defensive Shield Feature ──────────────────────────────────────────
+        this.shieldEnergyMax = 120.0;
+        this.shieldEnergy = this.shieldEnergyMax;
+        this.shieldActiveBase = false;
+        this.shieldPreviouslyPressed = false;
+
+        // Build 3D visuals for the shield
+        this.shieldGroup = new THREE.Group();
+        this.shieldGroup.visible = false;
+        this.mesh.add(this.shieldGroup); // Parent to mechaWrapper so it rotates with mecha automatically
+
+        // 1. Oval Shield Mesh (layered glass + glowing wireframe)
+        // Using a squished Icosahedron generates a beautiful repeating triangular geodesic lattice (classic sci-fi shield grid)
+        // instead of basic horizontal/vertical modeling loops. It forms a thin 'contact lens' shape when z-scaled!
+        const shieldGeo = new THREE.IcosahedronGeometry(1.0, 3);
+        const glassMat = new THREE.MeshPhysicalMaterial({
+            color: 0x00f2fe, emissive: 0x00f2fe, emissiveIntensity: 0.15,
+            transparent: true, opacity: 0.25, transmission: 0.7, roughness: 0.1, depthWrite: false, side: THREE.DoubleSide
+        });
+        const wireMat = new THREE.MeshBasicMaterial({
+            color: 0x4facfe, wireframe: true, transparent: true, opacity: 0.25, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide
+        });
+
+        this.shieldGlass = new THREE.Mesh(shieldGeo, glassMat);
+        this.shieldWire = new THREE.Mesh(shieldGeo, wireMat);
+
+        // Expand vertically and slightly horizontally to cover the legs and entire body
+        this.shieldGlass.scale.set(1.5, 2.7, 0.4);
+        this.shieldWire.scale.set(1.51, 2.71, 0.41);
+
+        // Lower the shield mesh to properly cover legs 
+        this.shieldGlass.position.set(0, 2.0, 1.8);
+        this.shieldWire.position.set(0, 2.0, 1.8);
+        this.shieldGroup.add(this.shieldGlass);
+        this.shieldGroup.add(this.shieldWire);
+
+        // 2. Projector Beam (from stomach to shield center)
+        // Stomach offset: (0, 2.0, 0). Shield center: (0, 2.0, 1.8)
+        const diff = new THREE.Vector3(0, 2.0, 1.8).sub(new THREE.Vector3(0, 2.0, 0));
+        const dist = diff.length();
+        const beamGeo = new THREE.CylinderGeometry(0.2, 0.05, dist, 12, 1, true); // wider at shield, narrow at stomach
+        const beamMat = new THREE.MeshBasicMaterial({
+            color: 0x00f2fe, transparent: true, opacity: 0.3, depthWrite: false, blending: THREE.AdditiveBlending
+        });
+        const beamMesh = new THREE.Mesh(beamGeo, beamMat);
+        beamMesh.position.copy(new THREE.Vector3(0, 2.0, 0).lerp(new THREE.Vector3(0, 2.0, 1.8), 0.5));
+
+        // Orient beam along the vector
+        const axis = new THREE.Vector3(0, 1, 0);
+        beamMesh.quaternion.setFromUnitVectors(axis, diff.clone().normalize());
+        this.shieldGroup.add(beamMesh);
+
+        // 3. Shield Physics Body
+        // Placed in collision group 4 (Shields) tracking the mask for Projectiles mapping
+        this.shieldPhysics = new CANNON.Body({
+            mass: 0, // static relative to mecha body (but we will strictly update its position)
+            shape: new CANNON.Box(new CANNON.Vec3(3.0, 4.0, 0.3)),
+            isTrigger: false
+        });
+        this.shieldPhysics.collisionFilterGroup = 4;
+        this.shieldPhysics.collisionFilterMask = 2 | 1; // Block projectiles(2) and environment(1)
+        // We do not add the shield directly to the rigid physics world as a free body, 
+        // because it's kinematic and strictly tethered to the front of the mecha.
+        // Instead, we will sync its coordinate transform manually when Active.
+        this.physicsWorld.world.addBody(this.shieldPhysics);
     }
 
     update(inputManager, dt) {
@@ -130,9 +196,95 @@ export class MechaController {
         if (inputManager.isShooting) {
             this.shoot(inputManager.fireMode || 1);
         }
-    }
+
+        // ── Shield Logic Processing ───────────────────────────────────────────
+        const isQ = inputManager.keys['q'] || inputManager.actions?.['toggleShield'];
+        const isE = inputManager.keys['e'] || inputManager.actions?.['holdShield'];
+
+        // Edge-trigger Q to toggle on/off
+        if (isQ && !this.shieldPreviouslyPressed) {
+            if (this.shieldActiveBase) {
+                this.shieldActiveBase = false;
+            } else {
+                // Minimum energy requirement (30 units = 1 min passive regen worth)
+                if (this.shieldEnergy >= 30.0) {
+                    this.shieldActiveBase = true;
+                }
+            }
+        }
+        this.shieldPreviouslyPressed = isQ;
+
+        // Calculate Effective State (Drops if E is held, regardless of base state)
+        const shieldEffectivelyOn = this.shieldActiveBase && !isE;
+
+        if (shieldEffectivelyOn) {
+            this.shieldEnergy -= dt; // Cost 1.0 energy per second
+            if (this.shieldEnergy <= 0) {
+                this.shieldEnergy = 0;
+                this.shieldActiveBase = false; // Auto force off on depletion
+            }
+        } else {
+            // Regen logic
+            if (isE && this.shieldActiveBase) {
+                // Suspended via E-hold penalizes regen rate heavily (0.25 sec/sec)
+                this.shieldEnergy += dt * 0.25;
+            } else {
+                // Standard passive regen restores in exactly 4 minutes (4*60 = 240s to restore 120 unit capacity) -> 0.5 sec/sec
+                this.shieldEnergy += dt * 0.5;
+            }
+            if (this.shieldEnergy > this.shieldEnergyMax) {
+                this.shieldEnergy = this.shieldEnergyMax;
+            }
+        }
+
+        // Sync visual & physical state
+        this.shieldGroup.visible = shieldEffectivelyOn;
+        this.isShieldDeployed = shieldEffectivelyOn; // Save for shoot check
+
+        const meterContainer = document.getElementById('shield-meter-container');
+        if (shieldEffectivelyOn) {
+            // Place Physics body exactly corresponding to the Mesh World space
+            const worldPos = new THREE.Vector3(0, 2.0, 1.8).applyMatrix4(this.mesh.matrixWorld);
+            this.shieldPhysics.position.copy(worldPos);
+            this.shieldPhysics.quaternion.copy(this.mesh.quaternion);
+            // Re-bind to grid
+            if (this.shieldPhysics.collisionFilterGroup === 0) {
+                this.shieldPhysics.collisionFilterGroup = 4;
+            }
+        } else {
+            // Toss physical component far so it doesn't block shots when transparent
+            this.shieldPhysics.position.set(0, -9999, 0);
+            this.shieldPhysics.collisionFilterGroup = 0;
+        }
+
+        // Bind DOM UI progress tracking
+        const fillBar = document.getElementById('shield-meter-fill');
+        if (fillBar) {
+            const percent = (this.shieldEnergy / this.shieldEnergyMax) * 100;
+            fillBar.style.width = `${percent}%`;
+
+            // Add pulse warning if it's dropping extremely low
+            if (this.shieldEnergy < 15.0) {
+                fillBar.style.background = `linear-gradient(90deg, #ff2a2a 0%, #ff7878 100%)`;
+            } else {
+                fillBar.style.background = `linear-gradient(90deg, #00f2fe 0%, #4facfe 100%)`;
+            }
+        }
+    } // <-- closing brace for update()
 
     shoot(fireMode = 1) {
+        if (this.isShieldDeployed) {
+            // Player attempted to fire while shield is blocking them inside. Show warning!
+            const meterContainer = document.getElementById('shield-meter-container');
+            if (meterContainer && !meterContainer.classList.contains('shield-warning')) {
+                meterContainer.classList.add('shield-warning');
+                setTimeout(() => {
+                    meterContainer?.classList.remove('shield-warning');
+                }, 2000);
+            }
+            return;
+        }
+
         const now = performance.now();
         // Per-shot fire rate limiter (still needed for rapid auto)
         const firerate = { 1: 250, 2: 80, 3: 350, 4: 800 };

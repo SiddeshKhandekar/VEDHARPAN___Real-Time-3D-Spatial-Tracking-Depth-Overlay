@@ -213,6 +213,66 @@ html {
     transform: translateY(0);
 }
 
+/* ── Defensive Shield Meter ──────────────────────────────────── */
+#shield-meter-container {
+    position: absolute;
+    bottom: 6px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 320px;
+    z-index: 10;
+    pointer-events: none;
+    user-select: none;
+    transition: opacity 0.3s;
+}
+
+.shield-meter-track {
+    width: 100%;
+    height: 6px;
+    background: rgba(0, 0, 0, 0.6);
+    border-radius: 4px;
+    overflow: hidden;
+    border: 1px solid rgba(0, 242, 254, 0.3);
+    box-shadow: 0 0 15px rgba(0, 242, 254, 0.15);
+    transition: border-color 0.2s, background 0.2s;
+}
+
+#shield-meter-container.shield-warning .shield-meter-track {
+    border-color: #ff2a2a;
+    background: rgba(255, 42, 42, 0.2);
+    box-shadow: 0 0 15px rgba(255, 42, 42, 0.4);
+    animation: shield-vibrate 0.1s linear infinite;
+}
+
+#shield-meter-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #00f2fe 0%, #4facfe 100%);
+    box-shadow: 0 0 8px rgba(0, 242, 254, 0.8);
+    transition: width 0.1s linear;
+}
+
+@keyframes shield-vibrate {
+    0% {
+        transform: translateY(0px) translateX(0px);
+    }
+
+    25% {
+        transform: translateY(-1px) translateX(1px);
+    }
+
+    50% {
+        transform: translateY(0px) translateX(-1px);
+    }
+
+    75% {
+        transform: translateY(1px) translateX(1px);
+    }
+
+    100% {
+        transform: translateY(0px) translateX(0px);
+    }
+}
+
 /* ── Ammo Meters Panel ───────────────────────────────────────── */
 #ammo-meters {
     position: absolute;

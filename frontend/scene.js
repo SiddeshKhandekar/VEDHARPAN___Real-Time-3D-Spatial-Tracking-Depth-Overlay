@@ -543,7 +543,7 @@ class DioramaScene {
         const sm = this.settingsManager;
         const groups = {
             'kb-movement-rows': ['moveForward', 'moveBackward', 'moveLeft', 'moveRight', 'jump'],
-            'kb-combat-rows': ['fireMode1', 'fireMode2', 'fireMode3', 'fireMode4'],
+            'kb-combat-rows': ['fireMode1', 'fireMode2', 'fireMode3', 'fireMode4', 'toggleShield', 'holdShield'],
             'kb-system-rows': ['toggleCamera', 'respawn', 'openMenu'],
             'kb-freeroam-rows': ['freeRoamForward', 'freeRoamBackward', 'freeRoamLeft', 'freeRoamRight', 'camUp', 'camDown', 'freeRoamRecenter'],
         };
