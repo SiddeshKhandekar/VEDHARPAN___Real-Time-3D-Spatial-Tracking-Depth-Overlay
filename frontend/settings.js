@@ -24,6 +24,8 @@ export const ACTIONS = {
     fireMode2: { label: 'Fire Mode: Rapid', group: 'combat', defaultKey: '2' },
     fireMode3: { label: 'Fire Mode: Missile', group: 'combat', defaultKey: '3' },
     fireMode4: { label: 'Fire Mode: Grenade', group: 'combat', defaultKey: '4' },
+    toggleShield: { label: 'Toggle Shield', group: 'combat', defaultKey: 'q', displayDefault: 'Q' },
+    holdShield: { label: 'Hold Shield (Interrupt)', group: 'combat', defaultKey: 'e', displayDefault: 'E' },
 
     // ── Camera / System ───────────────────────────────────────────────────
     toggleCamera: { label: 'Toggle Camera Mode', group: 'system', defaultKey: 'v', displayDefault: 'V' },
