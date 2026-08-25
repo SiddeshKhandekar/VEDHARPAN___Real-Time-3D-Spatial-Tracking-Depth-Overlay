@@ -952,31 +952,18 @@ class DioramaScene {
             },
             undefined,
             (error) => {
-                console.error('Error loading City Map (likely missing scene.bin or textures):', error);
-
-                // --- Placeholder Cube since the GLTF is missing its .bin ---
-                const geo = new THREE.BoxGeometry(200, 10, 200);
-                const mat = new THREE.MeshBasicMaterial({ color: 0xff00ff, wireframe: true, fog: false });
-                this.cityMap = new THREE.Mesh(geo, mat);
-                this.cityMap.position.set(0, -450, 0);
-                this.scene.add(this.cityMap);
-                console.log('Spawned fallback neon placeholder for City Map.');
+                console.error('Error loading City Map due to LFS pointer mismatch:', error);
             }
         );
 
         // 6, 7, 8. Load Hovering Building Assets with Accurate Surface Physics
         const loadHoveringBuilding = (fileName, scale) => {
-            // Randomize placement inside space globe (Radius 500), avoiding the very bottom
+            // Cluster placement visibly floating near eye level
             let pos = new THREE.Vector3();
-            let radius, phi, theta;
-            do {
-                radius = 150 + Math.random() * 250; // Distance from center 150-400
-                phi = Math.random() * Math.PI; // Vertical angle
-                theta = Math.random() * Math.PI * 2; // Horizontal angle
-                pos.x = radius * Math.sin(phi) * Math.cos(theta);
-                pos.y = radius * Math.cos(phi);
-                pos.z = radius * Math.sin(phi) * Math.sin(theta);
-            } while (pos.y < -150); // Avoid the very bottom area where the city map is
+            // X and Z tightly clustered around the bridge area. Y lowered to be in viewport.
+            pos.x = -15 + Math.random() * 30;
+            pos.y = 5 + Math.random() * 10;
+            pos.z = -15 + Math.random() * 30;
 
             const rotY = Math.random() * Math.PI * 2;
 
@@ -1001,6 +988,18 @@ class DioramaScene {
 
                     configureShadows(building, true, true);
                     this.scene.add(building);
+
+                    // Show success directly on screen so we know it loaded!
+                    const successDiv = document.createElement('div');
+                    successDiv.style.position = 'absolute';
+                    successDiv.style.top = (Math.random() * 200 + 50) + 'px';
+                    successDiv.style.right = '10px';
+                    successDiv.style.color = 'lime';
+                    successDiv.style.fontSize = '16px';
+                    successDiv.style.zIndex = '9999';
+                    successDiv.textContent = `Success: Built ${fileName}`;
+                    document.body.appendChild(successDiv);
+
                     console.log(`Loaded hovering asset at (${pos.x.toFixed(0)}, ${pos.y.toFixed(0)}, ${pos.z.toFixed(0)}): ${fileName}`);
                 },
                 undefined,
