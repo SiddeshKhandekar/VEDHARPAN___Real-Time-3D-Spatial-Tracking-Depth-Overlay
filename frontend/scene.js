@@ -957,14 +957,7 @@ class DioramaScene {
         );
 
         // 6, 7, 8. Load Hovering Building Assets with Accurate Surface Physics
-        const loadHoveringBuilding = (fileName, scale) => {
-            // Cluster placement visibly floating near eye level
-            let pos = new THREE.Vector3();
-            // X and Z tightly clustered around the bridge area. Y lowered to be in viewport.
-            pos.x = -15 + Math.random() * 30;
-            pos.y = 5 + Math.random() * 10;
-            pos.z = -15 + Math.random() * 30;
-
+        const loadHoveringBuilding = (fileName, pos, scale) => {
             const rotY = Math.random() * Math.PI * 2;
 
             loader.load(
@@ -983,22 +976,18 @@ class DioramaScene {
                     building.traverse((child) => {
                         if (child.isMesh) {
                             this.physicsWorld.addStaticTrimesh(child);
+
+                            // Override material to prevent fading into the background void
+                            if (child.material) {
+                                child.material.fog = false;
+                                child.material.emissive = new THREE.Color(0x353535);
+                                child.material.needsUpdate = true;
+                            }
                         }
                     });
 
                     configureShadows(building, true, true);
                     this.scene.add(building);
-
-                    // Show success directly on screen so we know it loaded!
-                    const successDiv = document.createElement('div');
-                    successDiv.style.position = 'absolute';
-                    successDiv.style.top = (Math.random() * 200 + 50) + 'px';
-                    successDiv.style.right = '10px';
-                    successDiv.style.color = 'lime';
-                    successDiv.style.fontSize = '16px';
-                    successDiv.style.zIndex = '9999';
-                    successDiv.textContent = `Success: Built ${fileName}`;
-                    document.body.appendChild(successDiv);
 
                     console.log(`Loaded hovering asset at (${pos.x.toFixed(0)}, ${pos.y.toFixed(0)}, ${pos.z.toFixed(0)}): ${fileName}`);
                 },
@@ -1006,10 +995,10 @@ class DioramaScene {
                 (error) => console.error(`Error loading physics building ${fileName}:`, error)
             );
         };
-
-        loadHoveringBuilding('building.glb', 1.0);
-        loadHoveringBuilding('brutalist_building.glb', 1.0);
-        loadHoveringBuilding('brutalist_building_1.glb', 1.0);
+        // Massively scaled up to match the Mecha's size, distributed uniquely across the sky
+        loadHoveringBuilding('building.glb', new THREE.Vector3(-150, 40, -100), 10.0);
+        loadHoveringBuilding('brutalist_building.glb', new THREE.Vector3(120, 80, -120), 10.0);
+        loadHoveringBuilding('brutalist_building_1.glb', new THREE.Vector3(50, 110, 180), 10.0);
     }
 
     /**
