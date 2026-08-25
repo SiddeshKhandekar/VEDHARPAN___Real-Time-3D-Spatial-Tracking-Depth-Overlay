@@ -64,7 +64,9 @@ export class MechaController {
         this.mesh.add(this.shieldGroup); // Parent to mechaWrapper so it rotates with mecha automatically
 
         // 1. Oval Shield Mesh (layered glass + glowing wireframe)
-        const shieldGeo = new THREE.SphereGeometry(3.0, 32, 16);
+        // Cut the sphere exactly in half (phi: 0 to PI) so it forms a frontal curved shield instead of a closed egg
+        // Base radius 1.0, scaled below to fit the mecha profile.
+        const shieldGeo = new THREE.SphereGeometry(1.0, 20, 10, 0, Math.PI);
         const glassMat = new THREE.MeshPhysicalMaterial({
             color: 0x00f2fe, emissive: 0x00f2fe, emissiveIntensity: 0.15,
             transparent: true, opacity: 0.3, transmission: 0.7, roughness: 0.1, depthWrite: false
@@ -74,23 +76,27 @@ export class MechaController {
         });
         this.shieldGlass = new THREE.Mesh(shieldGeo, glassMat);
         this.shieldWire = new THREE.Mesh(shieldGeo, wireMat);
-        this.shieldGlass.scale.set(1.0, 1.3, 0.25);
-        this.shieldWire.scale.set(1.0, 1.3, 0.26); // Slightly larger
-        this.shieldGlass.position.set(0, 3.0, 3.5);
-        this.shieldWire.position.set(0, 3.0, 3.5);
+        // Mecha physics box is 2.4 wide by 3.6 tall. We'll clip the shield just slightly wider than that.
+        this.shieldGlass.scale.set(1.3, 2.0, 0.4);
+        this.shieldWire.scale.set(1.35, 2.05, 0.45); // Slightly larger
+
+        // Since the hemisphere (phi=0 to PI) points forward (+Z), we position it in front
+        // so the flat back rim sits towards the mecha and the curve bows outward.
+        this.shieldGlass.position.set(0, 2.5, 1.5);
+        this.shieldWire.position.set(0, 2.5, 1.5);
         this.shieldGroup.add(this.shieldGlass);
         this.shieldGroup.add(this.shieldWire);
 
         // 2. Projector Beam (from stomach to shield center)
-        // Stomach offset: (0, 2.0, 0). Shield center: (0, 3.0, 3.5)
-        const diff = new THREE.Vector3(0, 3.0, 3.5).sub(new THREE.Vector3(0, 2.0, 0));
+        // Stomach offset: (0, 2.0, 0). Shield center: (0, 2.5, 1.5)
+        const diff = new THREE.Vector3(0, 2.5, 1.5).sub(new THREE.Vector3(0, 2.0, 0));
         const dist = diff.length();
-        const beamGeo = new THREE.CylinderGeometry(0.3, 0.05, dist, 12, 1, true); // wider at shield, narrow at stomach
+        const beamGeo = new THREE.CylinderGeometry(0.2, 0.05, dist, 12, 1, true); // wider at shield, narrow at stomach
         const beamMat = new THREE.MeshBasicMaterial({
             color: 0x00f2fe, transparent: true, opacity: 0.3, depthWrite: false, blending: THREE.AdditiveBlending
         });
         const beamMesh = new THREE.Mesh(beamGeo, beamMat);
-        beamMesh.position.copy(new THREE.Vector3(0, 2.0, 0).lerp(new THREE.Vector3(0, 3.0, 3.5), 0.5));
+        beamMesh.position.copy(new THREE.Vector3(0, 2.0, 0).lerp(new THREE.Vector3(0, 2.5, 1.5), 0.5));
 
         // Orient beam along the vector
         const axis = new THREE.Vector3(0, 1, 0);
@@ -243,7 +249,7 @@ export class MechaController {
         const meterContainer = document.getElementById('shield-meter-container');
         if (shieldEffectivelyOn) {
             // Place Physics body exactly corresponding to the Mesh World space
-            const worldPos = new THREE.Vector3(0, 3.0, 3.5).applyMatrix4(this.mesh.matrixWorld);
+            const worldPos = new THREE.Vector3(0, 2.5, 1.5).applyMatrix4(this.mesh.matrixWorld);
             this.shieldPhysics.position.copy(worldPos);
             this.shieldPhysics.quaternion.copy(this.mesh.quaternion);
             // Re-bind to grid
