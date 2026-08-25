@@ -133,6 +133,23 @@ export class InputManager {
             this.mousePos.y = -(e.clientY / window.innerHeight) * 2 + 1;
         });
 
+        // Weapon cycle scrolling
+        this.domElement.addEventListener('wheel', (e) => {
+            if (e.deltaY > 0) {
+                // Scroll Down -> Next mode
+                if (this.fireMode < 4) {
+                    this.fireMode++;
+                    window.dispatchEvent(new CustomEvent('fireModeChanged', { detail: this.fireMode }));
+                }
+            } else if (e.deltaY < 0) {
+                // Scroll Up -> Prev mode
+                if (this.fireMode > 1) {
+                    this.fireMode--;
+                    window.dispatchEvent(new CustomEvent('fireModeChanged', { detail: this.fireMode }));
+                }
+            }
+        }, { passive: true });
+
         // Prevent context menu on right click
         this.domElement.addEventListener('contextmenu', e => e.preventDefault());
     }
