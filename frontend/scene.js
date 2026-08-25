@@ -913,6 +913,102 @@ class DioramaScene {
             undefined,
             (error) => console.error('Error loading Tires Model:', error)
         );
+
+        // 5. Load City Map
+        loader.load(
+            `${assetPath}scene.gltf`,
+            (gltf) => {
+                this.cityMap = gltf.scene;
+
+                // Position roughly at first so we can compute the world bounding box
+                this.cityMap.position.set(0, -450, 0);
+
+                // Scale adjusted to be perfectly in the middle (between 5 and 50).
+                this.cityMap.scale.set(27.5, 27.5, 27.5);
+
+                // Rotate the map 180 degrees as requested.
+                this.cityMap.rotation.y = Math.PI;
+
+                // Compute exact geometric center 
+                this.cityMap.updateMatrixWorld(true);
+                const cityBox = new THREE.Box3().setFromObject(this.cityMap);
+                const cityCenter = cityBox.getCenter(new THREE.Vector3());
+
+                // Offset model so its geometric center is exactly at (0, -450, 0)
+                // which perfectly aligns beneath the urban room's origin position (0, -2.7, 0)
+                this.cityMap.position.x += (0 - cityCenter.x);
+                this.cityMap.position.y += (-450 - cityCenter.y);
+                this.cityMap.position.z += (0 - cityCenter.z);
+
+                // Prevent fog from completely hiding the distant city map
+                this.cityMap.traverse((child) => {
+                    if (child.isMesh && child.material) {
+                        child.material.fog = false;
+                    }
+                });
+
+                this.scene.add(this.cityMap);
+                console.log('Loaded: City Map');
+            },
+            undefined,
+            (error) => {
+                console.error('Error loading City Map due to LFS pointer mismatch:', error);
+            }
+        );
+
+        const loadHoveringBuilding = (fileName, scale) => {
+            // Broad distribution pushing the massive structures to the horizon lengths
+            let pos = new THREE.Vector3();
+            let distance;
+            do {
+                pos.x = -250 + Math.random() * 500;
+                pos.z = -250 + Math.random() * 500;
+                distance = Math.sqrt(pos.x * pos.x + pos.z * pos.z); // Lateral distance from the center platform
+            } while (distance < 80); // Ensure they don't spawn directly over the center bridge
+
+            pos.y = 40 + Math.random() * 60; // Keep them towering overhead
+
+            const rotY = Math.random() * Math.PI * 2;
+
+            loader.load(
+                `${assetPath}${fileName}`,
+                (gltf) => {
+                    const building = gltf.scene;
+                    building.position.copy(pos);
+                    building.scale.set(scale, scale, scale);
+                    building.rotation.y = rotY;
+
+                    // Ensure world matrices are computed before passing to physics
+                    building.updateMatrixWorld(true);
+
+                    // Add trimesh physics to each mesh in the building to ensure
+                    // it does not move and has surface-level collision accuracy.
+                    building.traverse((child) => {
+                        if (child.isMesh) {
+                            this.physicsWorld.addStaticTrimesh(child);
+
+                            // Override material to prevent fading into the background void
+                            if (child.material) {
+                                child.material.fog = false;
+                                child.material.emissive = new THREE.Color(0x353535);
+                                child.material.needsUpdate = true;
+                            }
+                        }
+                    });
+
+                    configureShadows(building, true, true);
+                    this.scene.add(building);
+
+                    console.log(`Loaded hovering asset at (${pos.x.toFixed(0)}, ${pos.y.toFixed(0)}, ${pos.z.toFixed(0)}): ${fileName}`);
+                },
+                undefined,
+                (error) => console.error(`Error loading physics building ${fileName}:`, error)
+            );
+        };
+        // Pass solely the filename and a massive unified scale 
+        loadHoveringBuilding('building.glb', 10.0);
+        loadHoveringBuilding('brutalist_building.glb', 10.0);
+        loadHoveringBuilding('brutalist_building_1.glb', 10.0);
     }
 
     /**
