@@ -66,6 +66,7 @@ export class InputManager {
             'v': 'toggleCamera',
             'escape': 'openMenu',
         };
+        this.actions = {}; // stores active raw Action IDs
 
         this._initListeners();
     }
@@ -100,6 +101,11 @@ export class InputManager {
             window.dispatchEvent(new CustomEvent('fireModeChanged', { detail: this.fireMode }));
             return;
         }
+
+        // ── Expose arbitrary standard actions ────────────────────
+        if (action) {
+            this.actions[action] = true;
+        }
     }
 
     _resolveKeyup(e) {
@@ -112,6 +118,10 @@ export class InputManager {
         if (action === 'moveLeft') { this.keys['a'] = false; }
         if (action === 'moveRight') { this.keys['d'] = false; }
         if (action === 'jump') { this.keys[' '] = false; }
+
+        if (action) {
+            this.actions[action] = false;
+        }
     }
 
     _initListeners() {
