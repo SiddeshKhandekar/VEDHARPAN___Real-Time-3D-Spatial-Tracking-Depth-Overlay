@@ -51,6 +51,65 @@ export class MechaController {
         [1, 2, 3, 4].forEach(m => {
             this.ammo[m] = { rounds: MAX[m], max: MAX[m], cooldownMs: CD[m], reloadEnd: 0, isReloading: false };
         });
+
+        // ── Defensive Shield Feature ──────────────────────────────────────────
+        this.shieldEnergyMax = 120.0;
+        this.shieldEnergy = this.shieldEnergyMax;
+        this.shieldActiveBase = false;
+        this.shieldPreviouslyPressed = false;
+
+        // Build 3D visuals for the shield
+        this.shieldGroup = new THREE.Group();
+        this.shieldGroup.visible = false;
+        this.mesh.add(this.shieldGroup); // Parent to mechaWrapper so it rotates with mecha automatically
+
+        // 1. Oval Shield Mesh (layered glass + glowing wireframe)
+        const shieldGeo = new THREE.SphereGeometry(3.0, 32, 16);
+        const glassMat = new THREE.MeshPhysicalMaterial({
+            color: 0x00f2fe, emissive: 0x00f2fe, emissiveIntensity: 0.15,
+            transparent: true, opacity: 0.3, transmission: 0.7, roughness: 0.1, depthWrite: false
+        });
+        const wireMat = new THREE.MeshBasicMaterial({
+            color: 0x4facfe, wireframe: true, transparent: true, opacity: 0.45, depthWrite: false, blending: THREE.AdditiveBlending
+        });
+        this.shieldGlass = new THREE.Mesh(shieldGeo, glassMat);
+        this.shieldWire = new THREE.Mesh(shieldGeo, wireMat);
+        this.shieldGlass.scale.set(1.0, 1.3, 0.25);
+        this.shieldWire.scale.set(1.0, 1.3, 0.26); // Slightly larger
+        this.shieldGlass.position.set(0, 3.0, 3.5);
+        this.shieldWire.position.set(0, 3.0, 3.5);
+        this.shieldGroup.add(this.shieldGlass);
+        this.shieldGroup.add(this.shieldWire);
+
+        // 2. Projector Beam (from stomach to shield center)
+        // Stomach offset: (0, 2.0, 0). Shield center: (0, 3.0, 3.5)
+        const diff = new THREE.Vector3(0, 3.0, 3.5).sub(new THREE.Vector3(0, 2.0, 0));
+        const dist = diff.length();
+        const beamGeo = new THREE.CylinderGeometry(0.3, 0.05, dist, 12, 1, true); // wider at shield, narrow at stomach
+        const beamMat = new THREE.MeshBasicMaterial({
+            color: 0x00f2fe, transparent: true, opacity: 0.3, depthWrite: false, blending: THREE.AdditiveBlending
+        });
+        const beamMesh = new THREE.Mesh(beamGeo, beamMat);
+        beamMesh.position.copy(new THREE.Vector3(0, 2.0, 0).lerp(new THREE.Vector3(0, 3.0, 3.5), 0.5));
+
+        // Orient beam along the vector
+        const axis = new THREE.Vector3(0, 1, 0);
+        beamMesh.quaternion.setFromUnitVectors(axis, diff.clone().normalize());
+        this.shieldGroup.add(beamMesh);
+
+        // 3. Shield Physics Body
+        // Placed in collision group 4 (Shields) tracking the mask for Projectiles mapping
+        this.shieldPhysics = new CANNON.Body({
+            mass: 0, // static relative to mecha body (but we will strictly update its position)
+            shape: new CANNON.Box(new CANNON.Vec3(3.0, 4.0, 0.3)),
+            isTrigger: false
+        });
+        this.shieldPhysics.collisionFilterGroup = 4;
+        this.shieldPhysics.collisionFilterMask = 2 | 1; // Block projectiles(2) and environment(1)
+        // We do not add the shield directly to the rigid physics world as a free body, 
+        // because it's kinematic and strictly tethered to the front of the mecha.
+        // Instead, we will sync its coordinate transform manually when Active.
+        this.physicsWorld.world.addBody(this.shieldPhysics);
     }
 
     update(inputManager, dt) {
@@ -130,45 +189,125 @@ export class MechaController {
         if (inputManager.isShooting) {
             this.shoot(inputManager.fireMode || 1);
         }
-    }
 
-    shoot(fireMode = 1) {
-        const now = performance.now();
-        // Per-shot fire rate limiter (still needed for rapid auto)
-        const firerate = { 1: 250, 2: 80, 3: 350, 4: 800 };
-        if (now - this.lastShotTime < (firerate[fireMode] ?? 250)) return;
+        // ── Shield Logic Processing ───────────────────────────────────────────
+        const isQ = inputManager.keys['q'] || inputManager.actions?.['toggleShield'];
+        const isE = inputManager.keys['e'] || inputManager.actions?.['holdShield'];
 
-        // Ammo check
-        const a = this.ammo[fireMode];
-        if (!a || a.isReloading || a.rounds <= 0) return;
+        // Edge-trigger Q to toggle on/off
+        if (isQ && !this.shieldPreviouslyPressed) {
+            if (this.shieldActiveBase) {
+                this.shieldActiveBase = false;
+            } else {
+                // Minimum energy requirement (30 units = 1 min passive regen worth)
+                if (this.shieldEnergy >= 30.0) {
+                    this.shieldActiveBase = true;
+                    document.getElementById('shield-meter-container')?.classList.remove('hidden');
+                }
+            }
+        }
+        this.shieldPreviouslyPressed = isQ;
 
-        this.lastShotTime = now;
-        a.rounds--;
+        // Calculate Effective State (Drops if E is held, regardless of base state)
+        const shieldEffectivelyOn = this.shieldActiveBase && !isE;
 
-        // Trigger cooldown when the last round is fired
-        if (a.rounds === 0) {
-            a.isReloading = true;
-            a.reloadEnd = now + a.cooldownMs;
+        if (shieldEffectivelyOn) {
+            this.shieldEnergy -= dt; // Cost 1.0 energy per second
+            if (this.shieldEnergy <= 0) {
+                this.shieldEnergy = 0;
+                this.shieldActiveBase = false; // Auto force off on depletion
+            }
+        } else {
+            // Regen logic
+            if (isE && this.shieldActiveBase) {
+                // Suspended via E-hold penalizes regen rate heavily (0.25 sec/sec)
+                this.shieldEnergy += dt * 0.25;
+            } else {
+                // Standard passive regen restores in exactly 4 minutes (4*60 = 240s to restore 120 unit capacity) -> 0.5 sec/sec
+                this.shieldEnergy += dt * 0.5;
+            }
+            if (this.shieldEnergy > this.shieldEnergyMax) {
+                this.shieldEnergy = this.shieldEnergyMax;
+                if (!this.shieldActiveBase) {
+                    document.getElementById('shield-meter-container')?.classList.add('hidden'); // auto-hide when full and off
+                }
+            } else {
+                document.getElementById('shield-meter-container')?.classList.remove('hidden');
+            }
         }
 
-        // Broadcast ammo state to HUD
-        window.dispatchEvent(new CustomEvent('ammoUpdate', {
-            detail: { mode: fireMode, rounds: a.rounds, max: a.max, isReloading: a.isReloading, cooldownMs: a.cooldownMs }
-        }));
+        // Sync visual & physical state
+        this.shieldGroup.visible = shieldEffectivelyOn;
+        if (shieldEffectivelyOn) {
+            // Place Physics body exactly corresponding to the Mesh World space
+            const worldPos = new THREE.Vector3(0, 3.0, 3.5).applyMatrix4(this.mesh.matrixWorld);
+            this.shieldPhysics.position.copy(worldPos);
+            this.shieldPhysics.quaternion.copy(this.mesh.quaternion);
+            // Re-bind to grid
+            if (this.shieldPhysics.collisionFilterGroup === 0) {
+                this.shieldPhysics.collisionFilterGroup = 4;
+            }
+        } else {
+            // Toss physical component far so it doesn't block shots when transparent
+            this.shieldPhysics.position.set(0, -9999, 0);
+            this.shieldPhysics.collisionFilterGroup = 0;
+        }
 
-        // Gun barrel position (approximate, local to mecha).
-        // Since we wrapped the mecha in an unscaled Group and raised it 2.35 units visually,
-        // we adjust the Y spawn point up linearly to match the new visual barrels.
-        const barrelLocalPos = new THREE.Vector3(0, 3.35, 2.0);
-        const barrelPos = barrelLocalPos.applyMatrix4(this.mesh.matrixWorld);
+        // Bind DOM UI progress tracking
+        const fillBar = document.getElementById('shield-meter-fill');
+        const timeLabel = document.getElementById('shield-time-label');
+        if (fillBar && timeLabel) {
+            const percent = (this.shieldEnergy / this.shieldEnergyMax) * 100;
+            fillBar.style.width = `${percent}%`;
+            timeLabel.textContent = `${this.shieldEnergy.toFixed(1)}s`;
 
-        // Direction: camera forward projected onto XZ, includes Y pitch
-        const camForward = new THREE.Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion).normalize();
-        const shootDir = (this.aimTarget && this.aimTarget.lengthSq() > 0.1)
-            ? new THREE.Vector3().subVectors(this.aimTarget, barrelPos).normalize()
-            : camForward;
+            // Add pulse warning if it's dropping extremely low
+            if (this.shieldEnergy < 15.0) {
+                fillBar.style.background = `linear-gradient(90deg, #ff2a2a 0%, #ff7878 100%)`;
+                fillBar.style.boxShadow = `0 0 12px rgba(255, 42, 42, 0.8)`;
+            } else {
+                fillBar.style.background = `linear-gradient(90deg, #00f2fe 0%, #4facfe 100%)`;
+                fillBar.style.boxShadow = `0 0 8px rgba(0, 242, 254, 0.8)`;
+            }
+        }
 
-        this.muzzleFlash.triggerMuzzleFlash(barrelPos, fireMode);
-        this.createProjectile(barrelPos, shootDir, fireMode);
+        shoot(fireMode = 1) {
+            const now = performance.now();
+            // Per-shot fire rate limiter (still needed for rapid auto)
+            const firerate = { 1: 250, 2: 80, 3: 350, 4: 800 };
+            if (now - this.lastShotTime < (firerate[fireMode] ?? 250)) return;
+
+            // Ammo check
+            const a = this.ammo[fireMode];
+            if (!a || a.isReloading || a.rounds <= 0) return;
+
+            this.lastShotTime = now;
+            a.rounds--;
+
+            // Trigger cooldown when the last round is fired
+            if (a.rounds === 0) {
+                a.isReloading = true;
+                a.reloadEnd = now + a.cooldownMs;
+            }
+
+            // Broadcast ammo state to HUD
+            window.dispatchEvent(new CustomEvent('ammoUpdate', {
+                detail: { mode: fireMode, rounds: a.rounds, max: a.max, isReloading: a.isReloading, cooldownMs: a.cooldownMs }
+            }));
+
+            // Gun barrel position (approximate, local to mecha).
+            // Since we wrapped the mecha in an unscaled Group and raised it 2.35 units visually,
+            // we adjust the Y spawn point up linearly to match the new visual barrels.
+            const barrelLocalPos = new THREE.Vector3(0, 3.35, 2.0);
+            const barrelPos = barrelLocalPos.applyMatrix4(this.mesh.matrixWorld);
+
+            // Direction: camera forward projected onto XZ, includes Y pitch
+            const camForward = new THREE.Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion).normalize();
+            const shootDir = (this.aimTarget && this.aimTarget.lengthSq() > 0.1)
+                ? new THREE.Vector3().subVectors(this.aimTarget, barrelPos).normalize()
+                : camForward;
+
+            this.muzzleFlash.triggerMuzzleFlash(barrelPos, fireMode);
+            this.createProjectile(barrelPos, shootDir, fireMode);
+        }
     }
-}
