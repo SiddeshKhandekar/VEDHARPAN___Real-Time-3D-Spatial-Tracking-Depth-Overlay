@@ -232,9 +232,22 @@ html {
     background: rgba(0, 0, 0, 0.6);
     border-radius: 4px;
     overflow: hidden;
+    position: relative;
     border: 1px solid rgba(0, 242, 254, 0.3);
     box-shadow: 0 0 15px rgba(0, 242, 254, 0.15);
     transition: border-color 0.2s, background 0.2s;
+}
+
+#shield-meter-threshold {
+    position: absolute;
+    top: 0;
+    left: 25%;
+    /* 30 out of 120 is exactly 25% */
+    width: 3px;
+    height: 100%;
+    background: rgba(255, 50, 50, 0.8);
+    box-shadow: 0 0 5px red;
+    z-index: 5;
 }
 
 #shield-meter-container.shield-warning .shield-meter-track {
@@ -250,6 +263,8 @@ html {
     box-shadow: 0 0 8px rgba(0, 242, 254, 0.8);
     transition: width 0.1s linear;
 }
+
+
 
 @keyframes shield-vibrate {
     0% {

@@ -58,6 +58,14 @@ export class MechaController {
         this.shieldActiveBase = false;
         this.shieldPreviouslyPressed = false;
 
+        this.c_cyan = new THREE.Color(0x00f2fe);
+        this.c_yellow = new THREE.Color(0xffff00);
+        this.c_orange = new THREE.Color(0xff8800);
+        this.c_red = new THREE.Color(0xff2a2a);
+
+        this.activeShieldColor = new THREE.Color(0x00f2fe);
+        this.shieldBlinkPhase = 0;
+
         // Build 3D visuals for the shield
         this.shieldGroup = new THREE.Group();
         this.shieldGroup.visible = false;
@@ -209,6 +217,12 @@ export class MechaController {
                 // Minimum energy requirement (30 units = 1 min passive regen worth)
                 if (this.shieldEnergy >= 30.0) {
                     this.shieldActiveBase = true;
+                } else {
+                    const meterContainer = document.getElementById('shield-meter-container');
+                    if (meterContainer && !meterContainer.classList.contains('shield-warning')) {
+                        meterContainer.classList.add('shield-warning');
+                        setTimeout(() => meterContainer.classList.remove('shield-warning'), 2000);
+                    }
                 }
             }
         }
@@ -241,6 +255,50 @@ export class MechaController {
         this.shieldGroup.visible = shieldEffectivelyOn;
         this.isShieldDeployed = shieldEffectivelyOn; // Save for shoot check
 
+        // --- Real-time Visual Shield Degradation ---
+        if (shieldEffectivelyOn) {
+            let currentOpacity = 0.25;
+
+            // Segmented Heat-Map Color Gradient (Cyan -> Yellow -> Orange -> Red)
+            if (this.shieldEnergy >= 15.0) {
+                this.activeShieldColor.copy(this.c_cyan);
+                this.shieldBlinkPhase = 0;
+            } else if (this.shieldEnergy <= 4.0) {
+                this.activeShieldColor.copy(this.c_red);
+
+                // Final 3 seconds blinking logic (3.0 and below)
+                if (this.shieldEnergy <= 3.0) {
+                    const blinkFreq = 4.0 + (3.0 - this.shieldEnergy) * 12.0;
+                    this.shieldBlinkPhase += dt * blinkFreq;
+                    const blinkScale = (Math.sin(this.shieldBlinkPhase) + 1.0) / 2.0;
+                    currentOpacity = 0.05 + blinkScale * 0.35; // aggressive pulse between 5% and 40%
+                } else {
+                    this.shieldBlinkPhase = 0;
+                }
+            } else {
+                this.shieldBlinkPhase = 0;
+                // Factor goes 0.0 -> 1.0 as energy drops from 15.0 to 4.0
+                const factor = 1.0 - ((this.shieldEnergy - 4.0) / 11.0);
+                if (factor < 0.33) {
+                    this.activeShieldColor.lerpColors(this.c_cyan, this.c_yellow, factor / 0.33);
+                } else if (factor < 0.66) {
+                    this.activeShieldColor.lerpColors(this.c_yellow, this.c_orange, (factor - 0.33) / 0.33);
+                } else {
+                    this.activeShieldColor.lerpColors(this.c_orange, this.c_red, (factor - 0.66) / 0.34);
+                }
+            }
+
+            // Sync other materials 
+            this.shieldGlass.material.color.copy(this.activeShieldColor);
+            this.shieldGlass.material.emissive.copy(this.activeShieldColor);
+            this.shieldWire.material.color.copy(this.activeShieldColor);
+
+            this.shieldGlass.material.opacity = currentOpacity;
+            this.shieldWire.material.opacity = currentOpacity;
+        } else {
+            this.shieldBlinkPhase = 0; // reset for next deployment
+        }
+
         const meterContainer = document.getElementById('shield-meter-container');
         if (shieldEffectivelyOn) {
             // Place Physics body exactly corresponding to the Mesh World space
@@ -268,6 +326,18 @@ export class MechaController {
                 fillBar.style.background = `linear-gradient(90deg, #ff2a2a 0%, #ff7878 100%)`;
             } else {
                 fillBar.style.background = `linear-gradient(90deg, #00f2fe 0%, #4facfe 100%)`;
+            }
+        }
+
+
+
+        // Toggle threshold dot
+        const thresholdEl = document.getElementById('shield-meter-threshold');
+        if (thresholdEl) {
+            if (this.shieldEnergy >= 30.0) {
+                thresholdEl.style.display = 'none';
+            } else {
+                thresholdEl.style.display = 'block';
             }
         }
     } // <-- closing brace for update()
