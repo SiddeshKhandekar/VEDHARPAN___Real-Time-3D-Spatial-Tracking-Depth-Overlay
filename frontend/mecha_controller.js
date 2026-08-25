@@ -270,44 +270,45 @@ export class MechaController {
                 fillBar.style.boxShadow = `0 0 8px rgba(0, 242, 254, 0.8)`;
             }
         }
+    } // <-- closing brace for update()
 
-        shoot(fireMode = 1) {
-            const now = performance.now();
-            // Per-shot fire rate limiter (still needed for rapid auto)
-            const firerate = { 1: 250, 2: 80, 3: 350, 4: 800 };
-            if (now - this.lastShotTime < (firerate[fireMode] ?? 250)) return;
+    shoot(fireMode = 1) {
+        const now = performance.now();
+        // Per-shot fire rate limiter (still needed for rapid auto)
+        const firerate = { 1: 250, 2: 80, 3: 350, 4: 800 };
+        if (now - this.lastShotTime < (firerate[fireMode] ?? 250)) return;
 
-            // Ammo check
-            const a = this.ammo[fireMode];
-            if (!a || a.isReloading || a.rounds <= 0) return;
+        // Ammo check
+        const a = this.ammo[fireMode];
+        if (!a || a.isReloading || a.rounds <= 0) return;
 
-            this.lastShotTime = now;
-            a.rounds--;
+        this.lastShotTime = now;
+        a.rounds--;
 
-            // Trigger cooldown when the last round is fired
-            if (a.rounds === 0) {
-                a.isReloading = true;
-                a.reloadEnd = now + a.cooldownMs;
-            }
-
-            // Broadcast ammo state to HUD
-            window.dispatchEvent(new CustomEvent('ammoUpdate', {
-                detail: { mode: fireMode, rounds: a.rounds, max: a.max, isReloading: a.isReloading, cooldownMs: a.cooldownMs }
-            }));
-
-            // Gun barrel position (approximate, local to mecha).
-            // Since we wrapped the mecha in an unscaled Group and raised it 2.35 units visually,
-            // we adjust the Y spawn point up linearly to match the new visual barrels.
-            const barrelLocalPos = new THREE.Vector3(0, 3.35, 2.0);
-            const barrelPos = barrelLocalPos.applyMatrix4(this.mesh.matrixWorld);
-
-            // Direction: camera forward projected onto XZ, includes Y pitch
-            const camForward = new THREE.Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion).normalize();
-            const shootDir = (this.aimTarget && this.aimTarget.lengthSq() > 0.1)
-                ? new THREE.Vector3().subVectors(this.aimTarget, barrelPos).normalize()
-                : camForward;
-
-            this.muzzleFlash.triggerMuzzleFlash(barrelPos, fireMode);
-            this.createProjectile(barrelPos, shootDir, fireMode);
+        // Trigger cooldown when the last round is fired
+        if (a.rounds === 0) {
+            a.isReloading = true;
+            a.reloadEnd = now + a.cooldownMs;
         }
+
+        // Broadcast ammo state to HUD
+        window.dispatchEvent(new CustomEvent('ammoUpdate', {
+            detail: { mode: fireMode, rounds: a.rounds, max: a.max, isReloading: a.isReloading, cooldownMs: a.cooldownMs }
+        }));
+
+        // Gun barrel position (approximate, local to mecha).
+        // Since we wrapped the mecha in an unscaled Group and raised it 2.35 units visually,
+        // we adjust the Y spawn point up linearly to match the new visual barrels.
+        const barrelLocalPos = new THREE.Vector3(0, 3.35, 2.0);
+        const barrelPos = barrelLocalPos.applyMatrix4(this.mesh.matrixWorld);
+
+        // Direction: camera forward projected onto XZ, includes Y pitch
+        const camForward = new THREE.Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion).normalize();
+        const shootDir = (this.aimTarget && this.aimTarget.lengthSq() > 0.1)
+            ? new THREE.Vector3().subVectors(this.aimTarget, barrelPos).normalize()
+            : camForward;
+
+        this.muzzleFlash.triggerMuzzleFlash(barrelPos, fireMode);
+        this.createProjectile(barrelPos, shootDir, fireMode);
     }
+}
