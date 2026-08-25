@@ -913,6 +913,56 @@ class DioramaScene {
             undefined,
             (error) => console.error('Error loading Tires Model:', error)
         );
+
+        // 5. Load City Map
+        loader.load(
+            `${assetPath}scene.gltf`,
+            (gltf) => {
+                this.cityMap = gltf.scene;
+
+                // Position roughly at first so we can compute the world bounding box
+                this.cityMap.position.set(0, -450, 0);
+
+                // Scale adjusted to be perfectly in the middle (between 5 and 50).
+                this.cityMap.scale.set(27.5, 27.5, 27.5);
+
+                // Rotate the map 180 degrees as requested.
+                this.cityMap.rotation.y = Math.PI;
+
+                // Compute exact geometric center 
+                this.cityMap.updateMatrixWorld(true);
+                const cityBox = new THREE.Box3().setFromObject(this.cityMap);
+                const cityCenter = cityBox.getCenter(new THREE.Vector3());
+
+                // Offset model so its geometric center is exactly at (0, -450, 0)
+                // which perfectly aligns beneath the urban room's origin position (0, -2.7, 0)
+                this.cityMap.position.x += (0 - cityCenter.x);
+                this.cityMap.position.y += (-450 - cityCenter.y);
+                this.cityMap.position.z += (0 - cityCenter.z);
+
+                // Prevent fog from completely hiding the distant city map
+                this.cityMap.traverse((child) => {
+                    if (child.isMesh && child.material) {
+                        child.material.fog = false;
+                    }
+                });
+
+                this.scene.add(this.cityMap);
+                console.log('Loaded: City Map');
+            },
+            undefined,
+            (error) => {
+                console.error('Error loading City Map (likely missing scene.bin or textures):', error);
+
+                // --- Placeholder Cube since the GLTF is missing its .bin ---
+                const geo = new THREE.BoxGeometry(200, 10, 200);
+                const mat = new THREE.MeshBasicMaterial({ color: 0xff00ff, wireframe: true, fog: false });
+                this.cityMap = new THREE.Mesh(geo, mat);
+                this.cityMap.position.set(0, -450, 0);
+                this.scene.add(this.cityMap);
+                console.log('Spawned fallback neon placeholder for City Map.');
+            }
+        );
     }
 
     /**
