@@ -237,7 +237,7 @@ html {
     transition: border-color 0.2s, background 0.2s;
 }
 
-#shield-meter-container.active-shield .shield-meter-track {
+#shield-meter-container.shield-warning .shield-meter-track {
     border-color: #ff2a2a;
     background: rgba(255, 42, 42, 0.2);
     box-shadow: 0 0 15px rgba(255, 42, 42, 0.4);

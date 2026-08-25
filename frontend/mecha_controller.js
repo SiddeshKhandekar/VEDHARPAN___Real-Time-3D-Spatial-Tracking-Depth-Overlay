@@ -238,6 +238,9 @@ export class MechaController {
 
         // Sync visual & physical state
         this.shieldGroup.visible = shieldEffectivelyOn;
+        this.isShieldDeployed = shieldEffectivelyOn; // Save for shoot check
+
+        const meterContainer = document.getElementById('shield-meter-container');
         if (shieldEffectivelyOn) {
             // Place Physics body exactly corresponding to the Mesh World space
             const worldPos = new THREE.Vector3(0, 3.0, 3.5).applyMatrix4(this.mesh.matrixWorld);
@@ -255,24 +258,32 @@ export class MechaController {
 
         // Bind DOM UI progress tracking
         const fillBar = document.getElementById('shield-meter-fill');
-        const timeLabel = document.getElementById('shield-time-label');
-        if (fillBar && timeLabel) {
+        if (fillBar) {
             const percent = (this.shieldEnergy / this.shieldEnergyMax) * 100;
             fillBar.style.width = `${percent}%`;
-            timeLabel.textContent = `${this.shieldEnergy.toFixed(1)}s`;
 
             // Add pulse warning if it's dropping extremely low
             if (this.shieldEnergy < 15.0) {
                 fillBar.style.background = `linear-gradient(90deg, #ff2a2a 0%, #ff7878 100%)`;
-                fillBar.style.boxShadow = `0 0 12px rgba(255, 42, 42, 0.8)`;
             } else {
                 fillBar.style.background = `linear-gradient(90deg, #00f2fe 0%, #4facfe 100%)`;
-                fillBar.style.boxShadow = `0 0 8px rgba(0, 242, 254, 0.8)`;
             }
         }
     } // <-- closing brace for update()
 
     shoot(fireMode = 1) {
+        if (this.isShieldDeployed) {
+            // Player attempted to fire while shield is blocking them inside. Show warning!
+            const meterContainer = document.getElementById('shield-meter-container');
+            if (meterContainer && !meterContainer.classList.contains('shield-warning')) {
+                meterContainer.classList.add('shield-warning');
+                setTimeout(() => {
+                    meterContainer?.classList.remove('shield-warning');
+                }, 2000);
+            }
+            return;
+        }
+
         const now = performance.now();
         // Per-shot fire rate limiter (still needed for rapid auto)
         const firerate = { 1: 250, 2: 80, 3: 350, 4: 800 };
