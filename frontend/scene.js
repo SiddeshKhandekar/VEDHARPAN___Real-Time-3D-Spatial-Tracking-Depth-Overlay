@@ -955,10 +955,26 @@ class DioramaScene {
                 });
 
                 if (blueGlowMesh) {
-                    this.scene.add(blueGlowMesh);
-                    blueGlowMesh.scale.copy(this.cityMap.scale);
-                    blueGlowMesh.rotation.copy(this.cityMap.rotation);
-                    blueGlowMesh.position.set(0, -2.7, 0); // Bottom of the urban_design_vr_room
+                    // Update matrices to ensure accurate world positions
+                    this.cityMap.updateMatrixWorld(true);
+
+                    const worldPos = new THREE.Vector3();
+                    blueGlowMesh.getWorldPosition(worldPos);
+
+                    // We want to move it to exactly (0, -480, 0) in world space
+                    const worldOffset = new THREE.Vector3(0 - worldPos.x, -480 - worldPos.y, 0 - worldPos.z);
+
+                    // Convert that world shift into its exact local shift
+                    const parentQuat = new THREE.Quaternion();
+                    blueGlowMesh.parent.getWorldQuaternion(parentQuat);
+
+                    const parentScale = new THREE.Vector3();
+                    blueGlowMesh.parent.getWorldScale(parentScale);
+
+                    const localOffset = worldOffset.applyQuaternion(parentQuat.invert()).divide(parentScale);
+
+                    // Safely apply the shift without breaking its parent rotations (which kept it flat on the ground)
+                    blueGlowMesh.position.add(localOffset);
                 }
 
                 this.scene.add(this.cityMap);
