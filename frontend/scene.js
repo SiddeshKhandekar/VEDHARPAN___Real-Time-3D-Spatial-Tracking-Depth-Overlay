@@ -947,6 +947,20 @@ class DioramaScene {
                     }
                 });
 
+                let blueGlowMesh = null;
+                this.cityMap.traverse((child) => {
+                    if (child.isMesh && (child.name.includes('Earth') || (child.material && child.material.name.includes('Earth')))) {
+                        blueGlowMesh = child;
+                    }
+                });
+
+                if (blueGlowMesh) {
+                    this.scene.add(blueGlowMesh);
+                    blueGlowMesh.scale.copy(this.cityMap.scale);
+                    blueGlowMesh.rotation.copy(this.cityMap.rotation);
+                    blueGlowMesh.position.set(0, -2.7, 0); // Bottom of the urban_design_vr_room
+                }
+
                 this.scene.add(this.cityMap);
                 console.log('Loaded: City Map');
             },
@@ -956,27 +970,14 @@ class DioramaScene {
             }
         );
 
-        const loadHoveringBuilding = (fileName, scale) => {
-            // Broad distribution pushing the massive structures to the horizon lengths
-            let pos = new THREE.Vector3();
-            let distance;
-            do {
-                pos.x = -250 + Math.random() * 500;
-                pos.z = -250 + Math.random() * 500;
-                distance = Math.sqrt(pos.x * pos.x + pos.z * pos.z); // Lateral distance from the center platform
-            } while (distance < 80); // Ensure they don't spawn directly over the center bridge
-
-            pos.y = 40 + Math.random() * 60; // Keep them towering overhead
-
-            const rotY = Math.random() * Math.PI * 2;
-
+        const loadHoveringBuilding = (fileName, scale, fixedPos) => {
             loader.load(
                 `${assetPath}${fileName}`,
                 (gltf) => {
                     const building = gltf.scene;
-                    building.position.copy(pos);
+                    building.position.copy(fixedPos);
                     building.scale.set(scale, scale, scale);
-                    building.rotation.y = rotY;
+                    building.rotation.y = (fixedPos.x * fixedPos.z) % (Math.PI * 2);
 
                     // Ensure world matrices are computed before passing to physics
                     building.updateMatrixWorld(true);
@@ -999,16 +1000,17 @@ class DioramaScene {
                     configureShadows(building, true, true);
                     this.scene.add(building);
 
-                    console.log(`Loaded hovering asset at (${pos.x.toFixed(0)}, ${pos.y.toFixed(0)}, ${pos.z.toFixed(0)}): ${fileName}`);
+                    console.log(`Loaded hovering asset at (${fixedPos.x.toFixed(0)}, ${fixedPos.y.toFixed(0)}, ${fixedPos.z.toFixed(0)}): ${fileName}`);
                 },
                 undefined,
                 (error) => console.error(`Error loading physics building ${fileName}:`, error)
             );
         };
-        // Pass solely the filename and a massive unified scale 
-        loadHoveringBuilding('building.glb', 10.0);
-        loadHoveringBuilding('brutalist_building.glb', 10.0);
-        loadHoveringBuilding('brutalist_building_1.glb', 10.0);
+
+        // Pass the filename, scale, and a fixed position hovering randomly in space away from the hall
+        loadHoveringBuilding('building.glb', 10.0, new THREE.Vector3(-150, 60, -250));
+        loadHoveringBuilding('brutalist_building.glb', 10.0, new THREE.Vector3(200, 80, -180));
+        loadHoveringBuilding('brutalist_building_1.glb', 10.0, new THREE.Vector3(120, 50, 220));
     }
 
     /**
