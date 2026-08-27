@@ -161,12 +161,7 @@ html {
     left: 0;
     width: 100vw;
     height: 100vh;
-    background: rgba(0, 0, 0, 0.7);
-    backdrop-filter: blur(15px);
-    -webkit-backdrop-filter: blur(15px);
-    transform: translateZ(0);
-    /* Force hardware compositing */
-    will-change: transform, opacity;
+    background: rgba(5, 10, 15, 0.98);
     display: flex;
     flex-direction: column;
     justify-content: center;

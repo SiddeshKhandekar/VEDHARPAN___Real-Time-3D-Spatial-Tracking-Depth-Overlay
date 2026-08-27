@@ -108,7 +108,9 @@ class DioramaScene {
         this.renderer = new THREE.WebGLRenderer({
             canvas: this.canvas,
             antialias: true,
-            alpha: true
+            alpha: false,
+            preserveDrawingBuffer: true,
+            powerPreference: "high-performance"
         });
         this.renderer.setSize(window.innerWidth, window.innerHeight);
         this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -435,10 +437,41 @@ class DioramaScene {
 
         // ── Open from Main Menu ─────────────────────────────────────────
         const btnOptions = document.getElementById('btn-options');
+        const settingsPanel = document.getElementById('settings-panel');
+
+        let targetSettingsScroll = 0;
+        let currentSettingsScroll = 0;
+
+        if (settingsPanel) {
+            settingsPanel.addEventListener('wheel', (e) => {
+                e.preventDefault();
+                const maxScroll = settingsPanel.scrollHeight - settingsPanel.clientHeight;
+                targetSettingsScroll += e.deltaY * 0.85;
+                targetSettingsScroll = Math.max(0, Math.min(targetSettingsScroll, maxScroll));
+            }, { passive: false });
+
+            const smoothScrollLoop = () => {
+                if (!settingsPanel.classList.contains('hidden')) {
+                    currentSettingsScroll += (targetSettingsScroll - currentSettingsScroll) * 0.12;
+                    settingsPanel.scrollTop = currentSettingsScroll;
+
+                    if (Math.abs(settingsPanel.scrollTop - Math.round(currentSettingsScroll)) > 2) {
+                        targetSettingsScroll = settingsPanel.scrollTop;
+                        currentSettingsScroll = settingsPanel.scrollTop;
+                    }
+                } else {
+                    targetSettingsScroll = settingsPanel.scrollTop;
+                    currentSettingsScroll = targetSettingsScroll;
+                }
+                requestAnimationFrame(smoothScrollLoop);
+            };
+            requestAnimationFrame(smoothScrollLoop);
+        }
+
         if (btnOptions) {
             btnOptions.addEventListener('click', () => {
                 document.getElementById('main-menu').classList.add('hidden');
-                document.getElementById('settings-panel').classList.remove('hidden');
+                settingsPanel.classList.remove('hidden');
                 this._renderKeybindRows();
                 // Sync fullscreen toggle state
                 document.getElementById('fullscreen-toggle').checked = sm.graphics.fullscreen;
