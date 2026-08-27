@@ -24,7 +24,7 @@ export class VisualEffects {
     _initCache() {
         // Base visual config
         this.cfg = {
-            1: { color: 0x6600ff, emissive: 0x9933ff, emissiveIntensity: 2.0, glow: 0.8 }, // Plasma
+            1: { color: 0x6600ff, emissive: 0x9933ff, emissiveIntensity: 4.5, glow: 1.6 }, // Plasma - Shader boost override (0 GPU cost)
             2: { color: 0xff4400, emissive: 0xff8800, emissiveIntensity: 3.0, glow: 0.4 }, // Bullet
             3: { color: 0xffffff, emissive: 0x00aaff, emissiveIntensity: 2.5, glow: 0.6 }, // Missile
             4: { color: 0xff0000, emissive: 0xaa0000, emissiveIntensity: 4.0, glow: 1.5 }, // Grenade
@@ -139,9 +139,9 @@ export class VisualEffects {
             mesh.add(plume);
         }
 
-        // Attach PointLight ONLY for heavy/slow weapons. 
-        // DO NOT attach to rapid fire (Mode 2/3) to prevent debilitating shader recompilations!
-        if (mode === 1 || mode === 4) {
+        // Attach PointLight ONLY for massive explosive/slow weapons. 
+        // DO NOT attach to rapid fire (Mode 1/2/3) to prevent debilitating shader recompilations!
+        if (mode === 4) {
             const light = new THREE.PointLight(cfg.emissive, 3, 6);
             mesh.add(light);
         }
