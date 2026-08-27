@@ -145,15 +145,17 @@ class DioramaScene {
             btnStart.addEventListener('click', () => {
                 const isFirstStart = !document.getElementById('hud').classList.contains('hidden');
 
-                // Close menu
-                document.getElementById('main-menu').classList.add('hidden');
-                document.getElementById('hud').classList.remove('hidden');
-                document.getElementById('game-hud').classList.remove('hidden');
-                document.getElementById('crosshair').classList.remove('hidden');
+                // FIRST: Instantly request Pointer Lock while the DOM button is still valid and visible
+                this.renderer.domElement.requestPointerLock();
 
-                if (this.cameraMode !== 0) {
-                    this.renderer.domElement.requestPointerLock();
-                }
+                // DANGEROUS CHROMIUM BUG AVOIDANCE: Defer hiding the menu by 50ms so Chromium 
+                // doesn't instantly cancel the Pointer Lock Promise because the target vanished!
+                setTimeout(() => {
+                    document.getElementById('main-menu').classList.add('hidden');
+                    document.getElementById('hud').classList.remove('hidden');
+                    document.getElementById('game-hud').classList.remove('hidden');
+                    document.getElementById('crosshair').classList.remove('hidden');
+                }, 50);
             });
         }
 
@@ -171,8 +173,12 @@ class DioramaScene {
         // ── Settings Panel wiring ────────────────────────────────────────────
         this._initSettingsPanel();
 
-        // Resolve top-level actions like Menu, Camera Mode, Respawn
         window.addEventListener('keydown', (e) => {
+            // Aggressive fallback: if Pointer Lock failed to engage on Play, capture it secretly on the first keystroke
+            if (this.gameState === 'playing' && document.pointerLockElement !== this.renderer.domElement) {
+                this.renderer.domElement.requestPointerLock();
+            }
+
             const map = this.settingsManager.buildKeyToActionMap();
             const action = map[e.key.toLowerCase()] || map[e.code.toLowerCase()];
             const isEscape = e.key === 'Escape' || action === 'openMenu';
@@ -201,14 +207,13 @@ class DioramaScene {
                         document.exitPointerLock();
                     }
                 } else {
-                    // Close Menu (Resume)
-                    menu.classList.add('hidden');
-                    document.getElementById('hud').classList.remove('hidden');
-                    document.getElementById('game-hud').classList.remove('hidden');
-                    document.getElementById('crosshair').classList.remove('hidden');
-                    if (this.cameraMode !== 0) {
-                        this.renderer.domElement.requestPointerLock();
-                    }
+                    this.renderer.domElement.requestPointerLock();
+                    setTimeout(() => {
+                        menu.classList.add('hidden');
+                        document.getElementById('hud').classList.remove('hidden');
+                        document.getElementById('game-hud').classList.remove('hidden');
+                        document.getElementById('crosshair').classList.remove('hidden');
+                    }, 50);
                 }
                 return; // Disable other keystrokes if opening menu
             }
@@ -227,7 +232,6 @@ class DioramaScene {
                 this.mechaController.body.velocity.set(0, 0, 0);
                 this.mechaController.body.angularVelocity.set(0, 0, 0);
             }
-
         });
 
         // Mouse controls: Free Roam = drag orbit, other modes = pointer-lock look
@@ -242,11 +246,9 @@ class DioramaScene {
                 // Green aiming crosshair
                 const xhair = document.getElementById('crosshair');
                 if (xhair) xhair.classList.add('aiming');
-                this._applyPointerLock();
             } else if (e.button === 0 && this.cameraMode === 0) {
-                // Free Roam left-click drag
+                // Free Roam left-click drag restored
                 this.isDragging = true;
-                this.previousMousePosition = { x: e.offsetX, y: e.offsetY };
             }
         });
 
@@ -259,9 +261,6 @@ class DioramaScene {
                     this.previousCameraMode = undefined;
                 }
                 // Revert crosshair to white
-                const xhair = document.getElementById('crosshair');
-                if (xhair) xhair.classList.remove('aiming');
-                this._applyPointerLock();
             } else {
                 this.isDragging = false;
             }
@@ -271,20 +270,10 @@ class DioramaScene {
             const sensitivity = 0.003;
             // Invert Y-axis multiplier from settings
             const pitchDir = this.settingsManager.graphics.invertMouse ? 1 : -1;
-            if (this.cameraMode !== 0 && this.gameState === 'playing') {
-                // movementX/Y works without pointer lock too, but pointer lock removes edge limits
+            if (this.gameState === 'playing') {
                 this.orbitYaw -= e.movementX * sensitivity;
                 this.orbitPitch += pitchDir * e.movementY * sensitivity;
                 this.orbitPitch = Math.max(-Math.PI / 2 + 0.05, Math.min(Math.PI / 2 - 0.05, this.orbitPitch));
-                // orbitYaw is intentionally NOT clamped — wraps freely for 360 degrees
-            } else if (this.isDragging && this.cameraMode === 0) {
-                // Free Roam: click-drag orbit
-                const deltaX = e.offsetX - this.previousMousePosition.x;
-                const deltaY = e.offsetY - this.previousMousePosition.y;
-                this.orbitYaw -= deltaX * 0.005;
-                this.orbitPitch += pitchDir * deltaY * 0.005;
-                this.orbitPitch = Math.max(-Math.PI / 2 + 0.1, Math.min(Math.PI / 2 - 0.1, this.orbitPitch));
-                this.previousMousePosition = { x: e.offsetX, y: e.offsetY };
             }
         });
 
@@ -292,7 +281,7 @@ class DioramaScene {
 
         // Click canvas to request Pointer Lock (enables unbounded movementX/Y)
         this.renderer.domElement.addEventListener('click', () => {
-            if (this.gameState === 'playing' && this.cameraMode !== 0) {
+            if (this.gameState === 'playing') {
                 this.renderer.domElement.requestPointerLock();
             }
         });
@@ -629,17 +618,11 @@ class DioramaScene {
     }
 
     /**
-     * Request or exit Pointer Lock depending on current camera mode.
-     * Free Roam (0) = mouse cursor visible for dragging.
-     * All other modes = cursor hidden, movementX/Y drives the camera orbit.
+     * Request Pointer Lock universally across all camera modes.
      */
     _applyPointerLock() {
         if (this.gameState !== 'playing') return;
-        if (this.cameraMode === 0) {
-            if (document.pointerLockElement) document.exitPointerLock();
-        } else {
-            this.renderer.domElement.requestPointerLock();
-        }
+        this.renderer.domElement.requestPointerLock();
     }
 
     /**
@@ -1118,15 +1101,29 @@ class DioramaScene {
 
             const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion);
             const right = new THREE.Vector3(1, 0, 0).applyQuaternion(this.camera.quaternion);
+
+            // True 3D Flight forward calculation (do NOT flatten Y)
+            const trueForward = forward.clone().normalize();
+
+            // Ground-flattened variables for standard Numpad movement
             forward.y = 0; right.y = 0;
             forward.normalize(); right.normalize();
 
             const acts = this.inputManager.actions;
 
+            if (acts['freeRoamFlight']) {
+                const flightSpeed = 35.0 * (dt || 1 / 60);
+                this.freeRoamOffset.add(trueForward.multiplyScalar(flightSpeed));
+            }
+
             if (acts['freeRoamForward']) this.freeRoamOffset.add(forward.clone().multiplyScalar(moveSpeed));
             if (acts['freeRoamBackward']) this.freeRoamOffset.sub(forward.clone().multiplyScalar(moveSpeed));
             if (acts['freeRoamLeft']) this.freeRoamOffset.sub(right.clone().multiplyScalar(moveSpeed));
             if (acts['freeRoamRight']) this.freeRoamOffset.add(right.clone().multiplyScalar(moveSpeed));
+
+            const rotSpeed = 2.0 * (dt || 1 / 60);
+            if (acts['freeRoamRotateLeft']) this.orbitYaw += rotSpeed;
+            if (acts['freeRoamRotateRight']) this.orbitYaw -= rotSpeed;
 
             if (acts['camUp']) this.freeRoamOffset.y += moveSpeed;
             if (acts['camDown']) this.freeRoamOffset.y -= moveSpeed;

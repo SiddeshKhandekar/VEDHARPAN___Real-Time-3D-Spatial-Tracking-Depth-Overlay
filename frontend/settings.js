@@ -35,10 +35,13 @@ export const ACTIONS = {
     // ── Free Roam Camera (Numpad) ─────────────────────────────────────────
     freeRoamForward: { label: 'Free Roam: Move Forward', group: 'freeRoam', defaultKey: 'numpad8', displayDefault: 'Num 8' },
     freeRoamBackward: { label: 'Free Roam: Move Backward', group: 'freeRoam', defaultKey: 'numpad2', displayDefault: 'Num 2' },
-    freeRoamLeft: { label: 'Free Roam: Strafe Left', group: 'freeRoam', defaultKey: 'numpad4', displayDefault: 'Num 4' },
-    freeRoamRight: { label: 'Free Roam: Strafe Right', group: 'freeRoam', defaultKey: 'numpad6', displayDefault: 'Num 6' },
+    freeRoamLeft: { label: 'Free Roam: Strafe Left', group: 'freeRoam', defaultKey: 'numpad1', displayDefault: 'Num 1' },
+    freeRoamRight: { label: 'Free Roam: Strafe Right', group: 'freeRoam', defaultKey: 'numpad3', displayDefault: 'Num 3' },
+    freeRoamRotateLeft: { label: 'Free Roam: Rotate Left', group: 'freeRoam', defaultKey: 'numpad4', displayDefault: 'Num 4' },
+    freeRoamRotateRight: { label: 'Free Roam: Rotate Right', group: 'freeRoam', defaultKey: 'numpad6', displayDefault: 'Num 6' },
     camUp: { label: 'Free Roam: Camera Up', group: 'freeRoam', defaultKey: 'numpad7', displayDefault: 'Num 7' },
     camDown: { label: 'Free Roam: Camera Down', group: 'freeRoam', defaultKey: 'numpad9', displayDefault: 'Num 9' },
+    freeRoamFlight: { label: 'Free Roam: Flight Mode', group: 'freeRoam', defaultKey: 'tab', displayDefault: 'Tab' },
     freeRoamRecenter: { label: 'Free Roam: Recenter', group: 'freeRoam', defaultKey: 'numpad5', displayDefault: 'Num 5' },
 };
 
