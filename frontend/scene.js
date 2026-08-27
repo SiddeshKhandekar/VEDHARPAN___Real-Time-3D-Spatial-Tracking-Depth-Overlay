@@ -893,6 +893,25 @@ class DioramaScene {
                     const body = this.physicsWorld.addDynamicBody(tireClone, 5, 'cylinder', 0.4);
                     // Crucial: instruct Cannon.js anti-gravity fields in physics_world.js to suspend it
                     body.ignoreGravity = true;
+
+                    // Eliminate vacuum friction so they coast infinitely
+                    body.linearDamping = 0.0;
+                    body.angularDamping = 0.0;
+
+                    // Assign a randomized kinetic drift vector
+                    const drift = 4.0;
+                    body.velocity.set(
+                        (Math.random() - 0.5) * drift,
+                        (Math.random() - 0.5) * drift,
+                        (Math.random() - 0.5) * drift
+                    );
+
+                    // Assign a slow perpetual tumble
+                    body.angularVelocity.set(
+                        (Math.random() - 0.5) * 2,
+                        (Math.random() - 0.5) * 2,
+                        (Math.random() - 0.5) * 2
+                    );
                 }
 
                 console.log('Loaded: 40 Zero-Gravity Tires Scattered in the Void');
@@ -1119,24 +1138,24 @@ class DioramaScene {
 
             const acts = this.inputManager.actions;
 
-            if (acts['freeRoamFlight']) {
+            if (acts['frFlight']) {
                 const flightSpeed = 35.0 * (dt || 1 / 60);
                 this.freeRoamOffset.add(trueForward.multiplyScalar(flightSpeed));
             }
 
-            if (acts['freeRoamForward']) this.freeRoamOffset.add(forward.clone().multiplyScalar(moveSpeed));
-            if (acts['freeRoamBackward']) this.freeRoamOffset.sub(forward.clone().multiplyScalar(moveSpeed));
-            if (acts['freeRoamLeft']) this.freeRoamOffset.sub(right.clone().multiplyScalar(moveSpeed));
-            if (acts['freeRoamRight']) this.freeRoamOffset.add(right.clone().multiplyScalar(moveSpeed));
+            if (acts['frForward']) this.freeRoamOffset.add(forward.clone().multiplyScalar(moveSpeed));
+            if (acts['frBackward']) this.freeRoamOffset.sub(forward.clone().multiplyScalar(moveSpeed));
+            if (acts['frLeft']) this.freeRoamOffset.sub(right.clone().multiplyScalar(moveSpeed));
+            if (acts['frRight']) this.freeRoamOffset.add(right.clone().multiplyScalar(moveSpeed));
 
             const rotSpeed = 2.0 * (dt || 1 / 60);
-            if (acts['freeRoamRotateLeft']) this.orbitYaw += rotSpeed;
-            if (acts['freeRoamRotateRight']) this.orbitYaw -= rotSpeed;
+            if (acts['frRotLeft']) this.orbitYaw += rotSpeed;
+            if (acts['frRotRight']) this.orbitYaw -= rotSpeed;
 
-            if (acts['camUp']) this.freeRoamOffset.y += moveSpeed;
-            if (acts['camDown']) this.freeRoamOffset.y -= moveSpeed;
+            if (acts['frUp']) this.freeRoamOffset.y += moveSpeed;
+            if (acts['frDown']) this.freeRoamOffset.y -= moveSpeed;
 
-            if (acts['freeRoamRecenter']) this.isRecentering = true;
+            if (acts['frRecenter']) this.isRecentering = true;
         }
 
         // Base orbit radius
