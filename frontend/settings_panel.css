@@ -14,6 +14,9 @@
     background: rgba(0, 0, 0, 0.82);
     backdrop-filter: blur(18px);
     -webkit-backdrop-filter: blur(18px);
+    transform: translateZ(0);
+    /* Force hardware compositing */
+    will-change: transform, opacity;
     z-index: 200;
     display: flex;
     flex-direction: column;

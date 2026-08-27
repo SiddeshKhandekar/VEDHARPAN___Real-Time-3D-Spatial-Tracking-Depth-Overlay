@@ -163,6 +163,10 @@ html {
     height: 100vh;
     background: rgba(0, 0, 0, 0.7);
     backdrop-filter: blur(15px);
+    -webkit-backdrop-filter: blur(15px);
+    transform: translateZ(0);
+    /* Force hardware compositing */
+    will-change: transform, opacity;
     display: flex;
     flex-direction: column;
     justify-content: center;
