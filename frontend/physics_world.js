@@ -145,8 +145,9 @@ export class PhysicsWorld {
         for (let i = this.dynamicBodies.length - 1; i >= 0; i--) {
             const pair = this.dynamicBodies[i];
 
-            // Check if mesh has been removed/destroyed
-            if (!pair.mesh.parent) {
+            // Check if mesh has been removed/destroyed OR plummeted hopelessly out of bounds
+            if (!pair.mesh.parent || pair.body.position.y < -300) {
+                if (pair.mesh.parent) pair.mesh.parent.remove(pair.mesh);
                 this.world.removeBody(pair.body);
                 this.dynamicBodies.splice(i, 1);
                 continue;

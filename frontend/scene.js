@@ -778,6 +778,10 @@ class DioramaScene {
                 this.roomModel.traverse((child) => {
                     if (child.isMesh) {
                         this.physicsWorld.addStaticTrimesh(child);
+                        if (child.material) {
+                            child.material.fog = false;
+                            child.material.needsUpdate = true;
+                        }
                     }
                 });
 
@@ -861,33 +865,37 @@ class DioramaScene {
             (error) => console.error('Error loading Space Globe:', error)
         );
 
-        // 4. Load Tires — scattered around the stairs and hall
+        // 4. Load Tires — scattered randomly across the void space
         loader.load(
             `${assetPath}game_ready_free_car_tires.glb`,
             (gltf) => {
-                // Scatter multiple tire groups everywhere in the hall
-                const tirePositions = [
-                    { x: -1.5, y: 0, z: 0.5, rotY: 0.3 },
-                    { x: 1.8, y: 5, z: -1.0, rotY: -0.5 },
-                    { x: -0.8, y: 1.8, z: -2.5, rotY: 1.2 },
-                    { x: 1.2, y: 2.2, z: -4.0, rotY: 2.0 },
-                    { x: -2.0, y: 0.5, z: 2.0, rotY: 0.8 },
-                    { x: 2.5, y: 0.8, z: 1.5, rotY: 1.5 },
-                ];
-
-                tirePositions.forEach((pos, idx) => {
+                // Scatter 40 tire clones everywhere in the space globe
+                for (let i = 0; i < 40; i++) {
                     const tireClone = gltf.scene.clone();
-                    tireClone.position.set(pos.x, pos.y, pos.z);
-                    tireClone.rotation.y = pos.rotY;
+
+                    // Volumetric distribution: spread 300 units wide, 200 units tall
+                    const rx = (Math.random() - 0.5) * 300;
+                    const ry = -50 + Math.random() * 200;
+                    const rz = (Math.random() - 0.5) * 300;
+
+                    tireClone.position.set(rx, ry, rz);
+
+                    // Random spherical tumbling rotations
+                    tireClone.rotation.x = Math.random() * Math.PI * 2;
+                    tireClone.rotation.y = Math.random() * Math.PI * 2;
+                    tireClone.rotation.z = Math.random() * Math.PI * 2;
+
                     tireClone.scale.set(0.4, 0.4, 0.4);
                     configureShadows(tireClone, true, true);
                     this.scene.add(tireClone);
 
-                    // Add to physics
-                    this.physicsWorld.addDynamicBody(tireClone, 20, 'cylinder', 0.4);
-                });
+                    // Add to physics with a lighter mass of 5 for explosive deflection
+                    const body = this.physicsWorld.addDynamicBody(tireClone, 5, 'cylinder', 0.4);
+                    // Crucial: instruct Cannon.js anti-gravity fields in physics_world.js to suspend it
+                    body.ignoreGravity = true;
+                }
 
-                console.log('Loaded: Tires scattered around Mecha');
+                console.log('Loaded: 40 Zero-Gravity Tires Scattered in the Void');
             },
             undefined,
             (error) => console.error('Error loading Tires Model:', error)
@@ -1273,10 +1281,10 @@ class DioramaScene {
      * @param {number} fireMode - 1=Plasma, 2=Rapid, 3=Spread, 4=Charged
      */
     spawnProjectile(position, direction, fireMode = 1) {
-        // Tuned stats based on user request (Missile mode is fastest, Grenade is heaviest)
-        const speeds = { 1: 30, 2: 40, 3: 65, 4: 10 };
+        // Tuned stats based on user request (Boosted ranges to survive the entire Void expanse)
+        const speeds = { 1: 120, 2: 180, 3: 65, 4: 10 };
         const radii = { 1: 0.22, 2: 0.10, 3: 0.16, 4: 0.55 };
-        const lifetimes = { 1: 3000, 2: 1500, 3: 2500, 4: 2000 };
+        const lifetimes = { 1: 15000, 2: 10000, 3: 2500, 4: 2000 };
         const scores = { 1: 10, 2: 5, 3: 8, 4: 25 };
 
         const speed = speeds[fireMode] ?? 22;
