@@ -54,6 +54,7 @@ class DioramaScene {
         this.roomModel = null;
         this.mechaModel = null;
         this.tiresModel = null;
+        this.collidableMeshes = [];
 
         // Telemetry state
         this.latestHead = { x: 0, y: 0, z: 0 };
@@ -787,6 +788,11 @@ class DioramaScene {
 
                 configureShadows(this.roomModel, false, true); // Room only receives shadows
                 this.scene.add(this.roomModel);
+                this.roomModel.traverse((child) => {
+                    if (child.isMesh) {
+                        this.collidableMeshes.push(child);
+                    }
+                });
                 console.log('Loaded: Room Environment');
 
                 // 2. Load Mecha — placed on the stairs (Moved inside Room load callback to ensure physics trimesh exists first)
@@ -984,6 +990,11 @@ class DioramaScene {
                 }
 
                 this.scene.add(this.cityMap);
+                this.cityMap.traverse((child) => {
+                    if (child.isMesh) {
+                        this.collidableMeshes.push(child);
+                    }
+                });
                 console.log('Loaded: City Map');
             },
             undefined,
@@ -1118,6 +1129,31 @@ class DioramaScene {
      * Dynamic Camera Parallax warping and off-axis viewport offset calculations
      * with integrated spherical mouse orbit control and continuous free-roam movement.
      */
+    
+    /**
+     * Helper to perform GTA-style physical raycast bouncing for the camera against solid environment meshes.
+     */
+    _applyCameraCollision(centerPoint, idealPos) {
+        if (!this.collidableMeshes || this.collidableMeshes.length === 0) return idealPos.clone();
+        
+        const dist = centerPoint.distanceTo(idealPos);
+        if (dist <= 0.1) return idealPos.clone();
+
+        const dir = new THREE.Vector3().subVectors(idealPos, centerPoint).normalize();
+        if (!this.camRaycaster) {
+            this.camRaycaster = new THREE.Raycaster();
+        }
+        this.camRaycaster.set(centerPoint, dir);
+        this.camRaycaster.far = dist;
+
+        const hits = this.camRaycaster.intersectObjects(this.collidableMeshes, true);
+        if (hits.length > 0) {
+            const safeDist = Math.max(0.0, hits[0].distance - 0.25);
+            return centerPoint.clone().add(dir.multiplyScalar(safeDist));
+        }
+        return idealPos.clone();
+    }
+
     applyParallax(dt) {
         const width = window.innerWidth;
         const height = window.innerHeight;
@@ -1189,9 +1225,35 @@ class DioramaScene {
             }
         }
 
-        const targetCamX = this.freeRoamOffset.x + orbitX + (parallaxX * rightX);
-        const targetCamY = this.freeRoamOffset.y + orbitY + parallaxY;
-        const targetCamZ = this.freeRoamOffset.z + orbitZ + (parallaxX * rightZ);
+        let targetCamX = this.freeRoamOffset.x + orbitX + (parallaxX * rightX);
+        let targetCamY = this.freeRoamOffset.y + orbitY + parallaxY;
+        let targetCamZ = this.freeRoamOffset.z + orbitZ + (parallaxX * rightZ);
+
+        // --- GTA-Style Camera Collision Raycasting ---
+        if (this.collidableMeshes && this.collidableMeshes.length > 0) {
+            const centerPoint = new THREE.Vector3(this.freeRoamOffset.x, this.freeRoamOffset.y + 1.5, this.freeRoamOffset.z);
+            const idealPos = new THREE.Vector3(targetCamX, targetCamY, targetCamZ);
+            const dist = centerPoint.distanceTo(idealPos);
+
+            if (dist > 0.1) {
+                const dir = new THREE.Vector3().subVectors(idealPos, centerPoint).normalize();
+                if (!this.camRaycaster) {
+                    this.camRaycaster = new THREE.Raycaster();
+                }
+                this.camRaycaster.set(centerPoint, dir);
+                this.camRaycaster.far = dist;
+
+                const hits = this.camRaycaster.intersectObjects(this.collidableMeshes, true);
+                if (hits.length > 0) {
+                    // Push camera slightly inward off the wall, collapsing entirely to centerPoint if necessary
+                    const safeDist = Math.max(0.0, hits[0].distance - 0.25);
+                    const safePos = centerPoint.clone().add(dir.multiplyScalar(safeDist));
+                    targetCamX = safePos.x;
+                    targetCamY = safePos.y;
+                    targetCamZ = safePos.z;
+                }
+            }
+        }
 
         // Smoothly interpolate camera position (Lerp) for stability
         this.camera.position.x += (targetCamX - this.camera.position.x) * 0.15;
@@ -1401,7 +1463,9 @@ class DioramaScene {
                     const orbitQuat = yawQuat.multiply(pitchQuat);
 
                     const offset = new THREE.Vector3(0, 4.35, -6).applyQuaternion(orbitQuat);
-                    const targetCamPos = mechaPos.clone().add(offset);
+                    let targetCamPos = mechaPos.clone().add(offset);
+                    const centerPoint = mechaPos.clone().add(new THREE.Vector3(0, 4.35, 0));
+                    targetCamPos = this._applyCameraCollision(centerPoint, targetCamPos);
                     this.camera.position.lerp(targetCamPos, 0.12);
                     this.camera.lookAt(mechaPos.clone().add(new THREE.Vector3(0, 3.85, 0)));
                     this.camera.clearViewOffset();
@@ -1435,7 +1499,9 @@ class DioramaScene {
                     const orbitQuat = yawQuat.multiply(pitchQuat);
 
                     const shoulderOffset = new THREE.Vector3(0.8, 4.15, -2.8).applyQuaternion(orbitQuat);
-                    const targetCamPos = mechaPos.clone().add(shoulderOffset);
+                    let targetCamPos = mechaPos.clone().add(shoulderOffset);
+                    const centerPoint = mechaPos.clone().add(new THREE.Vector3(0, 4.15, 0));
+                    targetCamPos = this._applyCameraCollision(centerPoint, targetCamPos);
                     this.camera.position.lerp(targetCamPos, 0.18);
 
                     const forward = new THREE.Vector3(0, 0, 1).applyQuaternion(orbitQuat);
