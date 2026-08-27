@@ -142,18 +142,24 @@ class DioramaScene {
         // Main Menu Buttons
         const btnStart = document.getElementById('btn-start');
         if (btnStart) {
-            btnStart.textContent = "Resume Game";
+            if (sessionStorage.getItem('vedharpan_autostart_newgame')) {
+                btnStart.textContent = "Start Game";
+            } else {
+                btnStart.textContent = "Resume Game";
+            }
         }
 
         const btnNewGame = document.getElementById('btn-new-game');
         if (btnNewGame) {
             btnNewGame.addEventListener('click', () => {
+                sessionStorage.setItem('vedharpan_autostart_newgame', 'true');
                 window.location.reload();
             });
         }
 
         if (btnStart) {
             btnStart.addEventListener('click', () => {
+                btnStart.textContent = "Resume Game";
                 const isFirstStart = !document.getElementById('hud').classList.contains('hidden');
 
                 // FIRST: Instantly request Pointer Lock while the DOM button is still valid and visible
@@ -385,6 +391,15 @@ class DioramaScene {
 
         // 10. Start Rendering Loop
         this.animate();
+
+        if (sessionStorage.getItem('vedharpan_autostart_newgame')) {
+            sessionStorage.removeItem('vedharpan_autostart_newgame');
+            // Allow renderer a split second to breathe before locking pointer
+            setTimeout(() => {
+                const startBtn = document.getElementById('btn-start');
+                if (startBtn) startBtn.click();
+            }, 250);
+        }
     }
 
     /**
