@@ -161,7 +161,7 @@ html {
     left: 0;
     width: 100vw;
     height: 100vh;
-    background: rgba(5, 10, 15, 0.98);
+    background: #050a0f;
     display: flex;
     flex-direction: column;
     justify-content: center;
