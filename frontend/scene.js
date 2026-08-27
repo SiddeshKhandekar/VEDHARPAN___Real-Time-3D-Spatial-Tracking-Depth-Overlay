@@ -143,6 +143,16 @@ class DioramaScene {
         const btnStart = document.getElementById('btn-start');
         if (btnStart) {
             btnStart.textContent = "Resume Game";
+        }
+
+        const btnNewGame = document.getElementById('btn-new-game');
+        if (btnNewGame) {
+            btnNewGame.addEventListener('click', () => {
+                window.location.reload();
+            });
+        }
+
+        if (btnStart) {
             btnStart.addEventListener('click', () => {
                 const isFirstStart = !document.getElementById('hud').classList.contains('hidden');
 
@@ -1129,13 +1139,13 @@ class DioramaScene {
      * Dynamic Camera Parallax warping and off-axis viewport offset calculations
      * with integrated spherical mouse orbit control and continuous free-roam movement.
      */
-    
+
     /**
      * Helper to perform GTA-style physical raycast bouncing for the camera against solid environment meshes.
      */
     _applyCameraCollision(centerPoint, idealPos) {
         if (!this.collidableMeshes || this.collidableMeshes.length === 0) return idealPos.clone();
-        
+
         const dist = centerPoint.distanceTo(idealPos);
         if (dist <= 0.1) return idealPos.clone();
 
