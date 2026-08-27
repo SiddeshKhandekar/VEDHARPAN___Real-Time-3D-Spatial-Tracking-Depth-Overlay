@@ -228,43 +228,6 @@ class DioramaScene {
                 this.mechaController.body.angularVelocity.set(0, 0, 0);
             }
 
-            // Numpad / Free Roam camera controls (cameraMode === 0)
-            if (this.cameraMode === 0 && this.gameState === 'playing') {
-                const moveSpeed = 0.8;
-                const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion);
-                const right = new THREE.Vector3(1, 0, 0).applyQuaternion(this.camera.quaternion);
-                forward.y = 0; right.y = 0;
-                forward.normalize(); right.normalize();
-
-                // Resolve pressed key to action (covers default AND custom bindings)
-                // (Already mapped above for system keys, but we grab the local freeRoam map specific to cameraMode 0)
-                const freeRoamAction = map[e.key.toLowerCase()] || map[e.code.toLowerCase()];
-
-                this.isRecentering = false;
-
-                if (e.key === '8' || e.code === 'Numpad8' || freeRoamAction === 'freeRoamForward') {
-                    this.freeRoamOffset.add(forward.multiplyScalar(moveSpeed));
-                }
-                if (e.key === '2' || e.code === 'Numpad2' || freeRoamAction === 'freeRoamBackward') {
-                    this.freeRoamOffset.sub(forward.multiplyScalar(moveSpeed));
-                }
-                if (e.key === '4' || e.code === 'Numpad4' || freeRoamAction === 'freeRoamLeft') {
-                    this.freeRoamOffset.sub(right.multiplyScalar(moveSpeed));
-                }
-                if (e.key === '6' || e.code === 'Numpad6' || freeRoamAction === 'freeRoamRight') {
-                    this.freeRoamOffset.add(right.multiplyScalar(moveSpeed));
-                }
-                // Camera Up (Num7) / Camera Down (Num9)
-                if (e.key === '7' || e.code === 'Numpad7' || freeRoamAction === 'camUp') {
-                    this.freeRoamOffset.y += moveSpeed;
-                }
-                if (e.key === '9' || e.code === 'Numpad9' || freeRoamAction === 'camDown') {
-                    this.freeRoamOffset.y -= moveSpeed;
-                }
-                if (e.key === '5' || e.code === 'Numpad5' || freeRoamAction === 'freeRoamRecenter') {
-                    this.isRecentering = true;
-                }
-            }
         });
 
         // Mouse controls: Free Roam = drag orbit, other modes = pointer-lock look
@@ -1143,11 +1106,33 @@ class DioramaScene {
 
     /**
      * Dynamic Camera Parallax warping and off-axis viewport offset calculations
-     * with integrated spherical mouse orbit control.
+     * with integrated spherical mouse orbit control and continuous free-roam movement.
      */
-    applyParallax() {
+    applyParallax(dt) {
         const width = window.innerWidth;
         const height = window.innerHeight;
+
+        // Continuous input-driven free roam offset
+        if (this.cameraMode === 0 && this.gameState === 'playing' && this.inputManager) {
+            const moveSpeed = 15.0 * (dt || 1 / 60);
+
+            const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion);
+            const right = new THREE.Vector3(1, 0, 0).applyQuaternion(this.camera.quaternion);
+            forward.y = 0; right.y = 0;
+            forward.normalize(); right.normalize();
+
+            const acts = this.inputManager.actions;
+
+            if (acts['freeRoamForward']) this.freeRoamOffset.add(forward.clone().multiplyScalar(moveSpeed));
+            if (acts['freeRoamBackward']) this.freeRoamOffset.sub(forward.clone().multiplyScalar(moveSpeed));
+            if (acts['freeRoamLeft']) this.freeRoamOffset.sub(right.clone().multiplyScalar(moveSpeed));
+            if (acts['freeRoamRight']) this.freeRoamOffset.add(right.clone().multiplyScalar(moveSpeed));
+
+            if (acts['camUp']) this.freeRoamOffset.y += moveSpeed;
+            if (acts['camDown']) this.freeRoamOffset.y -= moveSpeed;
+
+            if (acts['freeRoamRecenter']) this.isRecentering = true;
+        }
 
         // Base orbit radius
         const radius = 6.0;
@@ -1366,7 +1351,7 @@ class DioramaScene {
         switch (this.cameraMode) {
             case 0: // Free Roam
                 // Apply dynamic camera parallax and offset calculations
-                this.applyParallax();
+                this.applyParallax(dt);
 
                 // Override camera if hand gesture aiming in Free Roam
                 if (this.inputManager && this.inputManager.gestureAimActive) {
