@@ -54,6 +54,7 @@ class DioramaScene {
         this.roomModel = null;
         this.mechaModel = null;
         this.tiresModel = null;
+        this.collidableMeshes = [];
 
         // Telemetry state
         this.latestHead = { x: 0, y: 0, z: 0 };
@@ -108,7 +109,9 @@ class DioramaScene {
         this.renderer = new THREE.WebGLRenderer({
             canvas: this.canvas,
             antialias: true,
-            alpha: true
+            alpha: false,
+            preserveDrawingBuffer: true,
+            powerPreference: "high-performance"
         });
         this.renderer.setSize(window.innerWidth, window.innerHeight);
         this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -139,19 +142,37 @@ class DioramaScene {
         // Main Menu Buttons
         const btnStart = document.getElementById('btn-start');
         if (btnStart) {
-            btnStart.textContent = "Resume Game";
+            if (sessionStorage.getItem('vedharpan_autostart_newgame')) {
+                btnStart.textContent = "Start Game";
+            } else {
+                btnStart.textContent = "Resume Game";
+            }
+        }
+
+        const btnNewGame = document.getElementById('btn-new-game');
+        if (btnNewGame) {
+            btnNewGame.addEventListener('click', () => {
+                sessionStorage.setItem('vedharpan_autostart_newgame', 'true');
+                window.location.reload();
+            });
+        }
+
+        if (btnStart) {
             btnStart.addEventListener('click', () => {
+                btnStart.textContent = "Resume Game";
                 const isFirstStart = !document.getElementById('hud').classList.contains('hidden');
 
-                // Close menu
-                document.getElementById('main-menu').classList.add('hidden');
-                document.getElementById('hud').classList.remove('hidden');
-                document.getElementById('game-hud').classList.remove('hidden');
-                document.getElementById('crosshair').classList.remove('hidden');
+                // FIRST: Instantly request Pointer Lock while the DOM button is still valid and visible
+                this.renderer.domElement.requestPointerLock();
 
-                if (this.cameraMode !== 0) {
-                    this.renderer.domElement.requestPointerLock();
-                }
+                // DANGEROUS CHROMIUM BUG AVOIDANCE: Defer hiding the menu by 50ms so Chromium 
+                // doesn't instantly cancel the Pointer Lock Promise because the target vanished!
+                setTimeout(() => {
+                    document.getElementById('main-menu').classList.add('hidden');
+                    document.getElementById('hud').classList.remove('hidden');
+                    document.getElementById('game-hud').classList.remove('hidden');
+                    document.getElementById('crosshair').classList.remove('hidden');
+                }, 50);
             });
         }
 
@@ -169,8 +190,12 @@ class DioramaScene {
         // ── Settings Panel wiring ────────────────────────────────────────────
         this._initSettingsPanel();
 
-        // Resolve top-level actions like Menu, Camera Mode, Respawn
         window.addEventListener('keydown', (e) => {
+            // Aggressive fallback: if Pointer Lock failed to engage on Play, capture it secretly on the first keystroke
+            if (this.gameState === 'playing' && document.pointerLockElement !== this.renderer.domElement) {
+                this.renderer.domElement.requestPointerLock();
+            }
+
             const map = this.settingsManager.buildKeyToActionMap();
             const action = map[e.key.toLowerCase()] || map[e.code.toLowerCase()];
             const isEscape = e.key === 'Escape' || action === 'openMenu';
@@ -199,14 +224,13 @@ class DioramaScene {
                         document.exitPointerLock();
                     }
                 } else {
-                    // Close Menu (Resume)
-                    menu.classList.add('hidden');
-                    document.getElementById('hud').classList.remove('hidden');
-                    document.getElementById('game-hud').classList.remove('hidden');
-                    document.getElementById('crosshair').classList.remove('hidden');
-                    if (this.cameraMode !== 0) {
-                        this.renderer.domElement.requestPointerLock();
-                    }
+                    this.renderer.domElement.requestPointerLock();
+                    setTimeout(() => {
+                        menu.classList.add('hidden');
+                        document.getElementById('hud').classList.remove('hidden');
+                        document.getElementById('game-hud').classList.remove('hidden');
+                        document.getElementById('crosshair').classList.remove('hidden');
+                    }, 50);
                 }
                 return; // Disable other keystrokes if opening menu
             }
@@ -225,44 +249,6 @@ class DioramaScene {
                 this.mechaController.body.velocity.set(0, 0, 0);
                 this.mechaController.body.angularVelocity.set(0, 0, 0);
             }
-
-            // Numpad / Free Roam camera controls (cameraMode === 0)
-            if (this.cameraMode === 0 && this.gameState === 'playing') {
-                const moveSpeed = 0.8;
-                const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion);
-                const right = new THREE.Vector3(1, 0, 0).applyQuaternion(this.camera.quaternion);
-                forward.y = 0; right.y = 0;
-                forward.normalize(); right.normalize();
-
-                // Resolve pressed key to action (covers default AND custom bindings)
-                // (Already mapped above for system keys, but we grab the local freeRoam map specific to cameraMode 0)
-                const freeRoamAction = map[e.key.toLowerCase()] || map[e.code.toLowerCase()];
-
-                this.isRecentering = false;
-
-                if (e.key === '8' || e.code === 'Numpad8' || freeRoamAction === 'freeRoamForward') {
-                    this.freeRoamOffset.add(forward.multiplyScalar(moveSpeed));
-                }
-                if (e.key === '2' || e.code === 'Numpad2' || freeRoamAction === 'freeRoamBackward') {
-                    this.freeRoamOffset.sub(forward.multiplyScalar(moveSpeed));
-                }
-                if (e.key === '4' || e.code === 'Numpad4' || freeRoamAction === 'freeRoamLeft') {
-                    this.freeRoamOffset.sub(right.multiplyScalar(moveSpeed));
-                }
-                if (e.key === '6' || e.code === 'Numpad6' || freeRoamAction === 'freeRoamRight') {
-                    this.freeRoamOffset.add(right.multiplyScalar(moveSpeed));
-                }
-                // Camera Up (Num7) / Camera Down (Num9)
-                if (e.key === '7' || e.code === 'Numpad7' || freeRoamAction === 'camUp') {
-                    this.freeRoamOffset.y += moveSpeed;
-                }
-                if (e.key === '9' || e.code === 'Numpad9' || freeRoamAction === 'camDown') {
-                    this.freeRoamOffset.y -= moveSpeed;
-                }
-                if (e.key === '5' || e.code === 'Numpad5' || freeRoamAction === 'freeRoamRecenter') {
-                    this.isRecentering = true;
-                }
-            }
         });
 
         // Mouse controls: Free Roam = drag orbit, other modes = pointer-lock look
@@ -277,11 +263,9 @@ class DioramaScene {
                 // Green aiming crosshair
                 const xhair = document.getElementById('crosshair');
                 if (xhair) xhair.classList.add('aiming');
-                this._applyPointerLock();
             } else if (e.button === 0 && this.cameraMode === 0) {
-                // Free Roam left-click drag
+                // Free Roam left-click drag restored
                 this.isDragging = true;
-                this.previousMousePosition = { x: e.offsetX, y: e.offsetY };
             }
         });
 
@@ -294,9 +278,6 @@ class DioramaScene {
                     this.previousCameraMode = undefined;
                 }
                 // Revert crosshair to white
-                const xhair = document.getElementById('crosshair');
-                if (xhair) xhair.classList.remove('aiming');
-                this._applyPointerLock();
             } else {
                 this.isDragging = false;
             }
@@ -306,20 +287,10 @@ class DioramaScene {
             const sensitivity = 0.003;
             // Invert Y-axis multiplier from settings
             const pitchDir = this.settingsManager.graphics.invertMouse ? 1 : -1;
-            if (this.cameraMode !== 0 && this.gameState === 'playing') {
-                // movementX/Y works without pointer lock too, but pointer lock removes edge limits
+            if (this.gameState === 'playing') {
                 this.orbitYaw -= e.movementX * sensitivity;
                 this.orbitPitch += pitchDir * e.movementY * sensitivity;
                 this.orbitPitch = Math.max(-Math.PI / 2 + 0.05, Math.min(Math.PI / 2 - 0.05, this.orbitPitch));
-                // orbitYaw is intentionally NOT clamped — wraps freely for 360 degrees
-            } else if (this.isDragging && this.cameraMode === 0) {
-                // Free Roam: click-drag orbit
-                const deltaX = e.offsetX - this.previousMousePosition.x;
-                const deltaY = e.offsetY - this.previousMousePosition.y;
-                this.orbitYaw -= deltaX * 0.005;
-                this.orbitPitch += pitchDir * deltaY * 0.005;
-                this.orbitPitch = Math.max(-Math.PI / 2 + 0.1, Math.min(Math.PI / 2 - 0.1, this.orbitPitch));
-                this.previousMousePosition = { x: e.offsetX, y: e.offsetY };
             }
         });
 
@@ -327,7 +298,7 @@ class DioramaScene {
 
         // Click canvas to request Pointer Lock (enables unbounded movementX/Y)
         this.renderer.domElement.addEventListener('click', () => {
-            if (this.gameState === 'playing' && this.cameraMode !== 0) {
+            if (this.gameState === 'playing') {
                 this.renderer.domElement.requestPointerLock();
             }
         });
@@ -420,6 +391,15 @@ class DioramaScene {
 
         // 10. Start Rendering Loop
         this.animate();
+
+        if (sessionStorage.getItem('vedharpan_autostart_newgame')) {
+            sessionStorage.removeItem('vedharpan_autostart_newgame');
+            // Allow renderer a split second to breathe before locking pointer
+            setTimeout(() => {
+                const startBtn = document.getElementById('btn-start');
+                if (startBtn) startBtn.click();
+            }, 250);
+        }
     }
 
     /**
@@ -435,10 +415,41 @@ class DioramaScene {
 
         // ── Open from Main Menu ─────────────────────────────────────────
         const btnOptions = document.getElementById('btn-options');
+        const settingsPanel = document.getElementById('settings-panel');
+
+        let targetSettingsScroll = 0;
+        let currentSettingsScroll = 0;
+
+        if (settingsPanel) {
+            settingsPanel.addEventListener('wheel', (e) => {
+                e.preventDefault();
+                const maxScroll = settingsPanel.scrollHeight - settingsPanel.clientHeight;
+                targetSettingsScroll += e.deltaY * 0.85;
+                targetSettingsScroll = Math.max(0, Math.min(targetSettingsScroll, maxScroll));
+            }, { passive: false });
+
+            const smoothScrollLoop = () => {
+                if (!settingsPanel.classList.contains('hidden')) {
+                    currentSettingsScroll += (targetSettingsScroll - currentSettingsScroll) * 0.12;
+                    settingsPanel.scrollTop = currentSettingsScroll;
+
+                    if (Math.abs(settingsPanel.scrollTop - Math.round(currentSettingsScroll)) > 2) {
+                        targetSettingsScroll = settingsPanel.scrollTop;
+                        currentSettingsScroll = settingsPanel.scrollTop;
+                    }
+                } else {
+                    targetSettingsScroll = settingsPanel.scrollTop;
+                    currentSettingsScroll = targetSettingsScroll;
+                }
+                requestAnimationFrame(smoothScrollLoop);
+            };
+            requestAnimationFrame(smoothScrollLoop);
+        }
+
         if (btnOptions) {
             btnOptions.addEventListener('click', () => {
                 document.getElementById('main-menu').classList.add('hidden');
-                document.getElementById('settings-panel').classList.remove('hidden');
+                settingsPanel.classList.remove('hidden');
                 this._renderKeybindRows();
                 // Sync fullscreen toggle state
                 document.getElementById('fullscreen-toggle').checked = sm.graphics.fullscreen;
@@ -633,17 +644,11 @@ class DioramaScene {
     }
 
     /**
-     * Request or exit Pointer Lock depending on current camera mode.
-     * Free Roam (0) = mouse cursor visible for dragging.
-     * All other modes = cursor hidden, movementX/Y drives the camera orbit.
+     * Request Pointer Lock universally across all camera modes.
      */
     _applyPointerLock() {
         if (this.gameState !== 'playing') return;
-        if (this.cameraMode === 0) {
-            if (document.pointerLockElement) document.exitPointerLock();
-        } else {
-            this.renderer.domElement.requestPointerLock();
-        }
+        this.renderer.domElement.requestPointerLock();
     }
 
     /**
@@ -799,11 +804,20 @@ class DioramaScene {
                 this.roomModel.traverse((child) => {
                     if (child.isMesh) {
                         this.physicsWorld.addStaticTrimesh(child);
+                        if (child.material) {
+                            child.material.fog = false;
+                            child.material.needsUpdate = true;
+                        }
                     }
                 });
 
                 configureShadows(this.roomModel, false, true); // Room only receives shadows
                 this.scene.add(this.roomModel);
+                this.roomModel.traverse((child) => {
+                    if (child.isMesh) {
+                        this.collidableMeshes.push(child);
+                    }
+                });
                 console.log('Loaded: Room Environment');
 
                 // 2. Load Mecha — placed on the stairs (Moved inside Room load callback to ensure physics trimesh exists first)
@@ -882,33 +896,56 @@ class DioramaScene {
             (error) => console.error('Error loading Space Globe:', error)
         );
 
-        // 4. Load Tires — scattered around the stairs and hall
+        // 4. Load Tires — scattered randomly across the void space
         loader.load(
             `${assetPath}game_ready_free_car_tires.glb`,
             (gltf) => {
-                // Scatter multiple tire groups everywhere in the hall
-                const tirePositions = [
-                    { x: -1.5, y: 0, z: 0.5, rotY: 0.3 },
-                    { x: 1.8, y: 5, z: -1.0, rotY: -0.5 },
-                    { x: -0.8, y: 1.8, z: -2.5, rotY: 1.2 },
-                    { x: 1.2, y: 2.2, z: -4.0, rotY: 2.0 },
-                    { x: -2.0, y: 0.5, z: 2.0, rotY: 0.8 },
-                    { x: 2.5, y: 0.8, z: 1.5, rotY: 1.5 },
-                ];
-
-                tirePositions.forEach((pos, idx) => {
+                // Scatter 40 tire clones everywhere in the space globe
+                for (let i = 0; i < 40; i++) {
                     const tireClone = gltf.scene.clone();
-                    tireClone.position.set(pos.x, pos.y, pos.z);
-                    tireClone.rotation.y = pos.rotY;
+
+                    // Volumetric distribution: spread 300 units wide, 200 units tall
+                    const rx = (Math.random() - 0.5) * 300;
+                    const ry = -50 + Math.random() * 200;
+                    const rz = (Math.random() - 0.5) * 300;
+
+                    tireClone.position.set(rx, ry, rz);
+
+                    // Random spherical tumbling rotations
+                    tireClone.rotation.x = Math.random() * Math.PI * 2;
+                    tireClone.rotation.y = Math.random() * Math.PI * 2;
+                    tireClone.rotation.z = Math.random() * Math.PI * 2;
+
                     tireClone.scale.set(0.4, 0.4, 0.4);
                     configureShadows(tireClone, true, true);
                     this.scene.add(tireClone);
 
-                    // Add to physics
-                    this.physicsWorld.addDynamicBody(tireClone, 20, 'cylinder', 0.4);
-                });
+                    // Add to physics with a lighter mass of 5 for explosive deflection
+                    const body = this.physicsWorld.addDynamicBody(tireClone, 5, 'cylinder', 0.4);
+                    // Crucial: instruct Cannon.js anti-gravity fields in physics_world.js to suspend it
+                    body.ignoreGravity = true;
 
-                console.log('Loaded: Tires scattered around Mecha');
+                    // Eliminate vacuum friction so they coast infinitely
+                    body.linearDamping = 0.0;
+                    body.angularDamping = 0.0;
+
+                    // Assign a randomized kinetic drift vector
+                    const drift = 4.0;
+                    body.velocity.set(
+                        (Math.random() - 0.5) * drift,
+                        (Math.random() - 0.5) * drift,
+                        (Math.random() - 0.5) * drift
+                    );
+
+                    // Assign a slow perpetual tumble
+                    body.angularVelocity.set(
+                        (Math.random() - 0.5) * 2,
+                        (Math.random() - 0.5) * 2,
+                        (Math.random() - 0.5) * 2
+                    );
+                }
+
+                console.log('Loaded: 40 Zero-Gravity Tires Scattered in the Void');
             },
             undefined,
             (error) => console.error('Error loading Tires Model:', error)
@@ -978,6 +1015,11 @@ class DioramaScene {
                 }
 
                 this.scene.add(this.cityMap);
+                this.cityMap.traverse((child) => {
+                    if (child.isMesh) {
+                        this.collidableMeshes.push(child);
+                    }
+                });
                 console.log('Loaded: City Map');
             },
             undefined,
@@ -1110,11 +1152,72 @@ class DioramaScene {
 
     /**
      * Dynamic Camera Parallax warping and off-axis viewport offset calculations
-     * with integrated spherical mouse orbit control.
+     * with integrated spherical mouse orbit control and continuous free-roam movement.
      */
-    applyParallax() {
+
+    /**
+     * Helper to perform GTA-style physical raycast bouncing for the camera against solid environment meshes.
+     */
+    _applyCameraCollision(centerPoint, idealPos) {
+        if (!this.collidableMeshes || this.collidableMeshes.length === 0) return idealPos.clone();
+
+        const dist = centerPoint.distanceTo(idealPos);
+        if (dist <= 0.1) return idealPos.clone();
+
+        const dir = new THREE.Vector3().subVectors(idealPos, centerPoint).normalize();
+        if (!this.camRaycaster) {
+            this.camRaycaster = new THREE.Raycaster();
+        }
+        this.camRaycaster.set(centerPoint, dir);
+        this.camRaycaster.far = dist;
+
+        const hits = this.camRaycaster.intersectObjects(this.collidableMeshes, true);
+        if (hits.length > 0) {
+            const safeDist = Math.max(0.0, hits[0].distance - 0.25);
+            return centerPoint.clone().add(dir.multiplyScalar(safeDist));
+        }
+        return idealPos.clone();
+    }
+
+    applyParallax(dt) {
         const width = window.innerWidth;
         const height = window.innerHeight;
+
+        // Continuous input-driven free roam offset
+        if (this.cameraMode === 0 && this.gameState === 'playing' && this.inputManager) {
+            const moveSpeed = 15.0 * (dt || 1 / 60);
+
+            const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion);
+            const right = new THREE.Vector3(1, 0, 0).applyQuaternion(this.camera.quaternion);
+
+            // True 3D Flight forward calculation (do NOT flatten Y)
+            const trueForward = forward.clone().normalize();
+
+            // Ground-flattened variables for standard Numpad movement
+            forward.y = 0; right.y = 0;
+            forward.normalize(); right.normalize();
+
+            const acts = this.inputManager.actions;
+
+            if (acts['frFlight']) {
+                const flightSpeed = 35.0 * (dt || 1 / 60);
+                this.freeRoamOffset.add(trueForward.multiplyScalar(flightSpeed));
+            }
+
+            if (acts['frForward']) this.freeRoamOffset.add(forward.clone().multiplyScalar(moveSpeed));
+            if (acts['frBackward']) this.freeRoamOffset.sub(forward.clone().multiplyScalar(moveSpeed));
+            if (acts['frLeft']) this.freeRoamOffset.sub(right.clone().multiplyScalar(moveSpeed));
+            if (acts['frRight']) this.freeRoamOffset.add(right.clone().multiplyScalar(moveSpeed));
+
+            const rotSpeed = 2.0 * (dt || 1 / 60);
+            if (acts['frRotLeft']) this.orbitYaw += rotSpeed;
+            if (acts['frRotRight']) this.orbitYaw -= rotSpeed;
+
+            if (acts['frUp']) this.freeRoamOffset.y += moveSpeed;
+            if (acts['frDown']) this.freeRoamOffset.y -= moveSpeed;
+
+            if (acts['frRecenter']) this.isRecentering = true;
+        }
 
         // Base orbit radius
         const radius = 6.0;
@@ -1147,9 +1250,35 @@ class DioramaScene {
             }
         }
 
-        const targetCamX = this.freeRoamOffset.x + orbitX + (parallaxX * rightX);
-        const targetCamY = this.freeRoamOffset.y + orbitY + parallaxY;
-        const targetCamZ = this.freeRoamOffset.z + orbitZ + (parallaxX * rightZ);
+        let targetCamX = this.freeRoamOffset.x + orbitX + (parallaxX * rightX);
+        let targetCamY = this.freeRoamOffset.y + orbitY + parallaxY;
+        let targetCamZ = this.freeRoamOffset.z + orbitZ + (parallaxX * rightZ);
+
+        // --- GTA-Style Camera Collision Raycasting ---
+        if (this.collidableMeshes && this.collidableMeshes.length > 0) {
+            const centerPoint = new THREE.Vector3(this.freeRoamOffset.x, this.freeRoamOffset.y + 1.5, this.freeRoamOffset.z);
+            const idealPos = new THREE.Vector3(targetCamX, targetCamY, targetCamZ);
+            const dist = centerPoint.distanceTo(idealPos);
+
+            if (dist > 0.1) {
+                const dir = new THREE.Vector3().subVectors(idealPos, centerPoint).normalize();
+                if (!this.camRaycaster) {
+                    this.camRaycaster = new THREE.Raycaster();
+                }
+                this.camRaycaster.set(centerPoint, dir);
+                this.camRaycaster.far = dist;
+
+                const hits = this.camRaycaster.intersectObjects(this.collidableMeshes, true);
+                if (hits.length > 0) {
+                    // Push camera slightly inward off the wall, collapsing entirely to centerPoint if necessary
+                    const safeDist = Math.max(0.0, hits[0].distance - 0.25);
+                    const safePos = centerPoint.clone().add(dir.multiplyScalar(safeDist));
+                    targetCamX = safePos.x;
+                    targetCamY = safePos.y;
+                    targetCamZ = safePos.z;
+                }
+            }
+        }
 
         // Smoothly interpolate camera position (Lerp) for stability
         this.camera.position.x += (targetCamX - this.camera.position.x) * 0.15;
@@ -1258,10 +1387,10 @@ class DioramaScene {
      * @param {number} fireMode - 1=Plasma, 2=Rapid, 3=Spread, 4=Charged
      */
     spawnProjectile(position, direction, fireMode = 1) {
-        // Tuned stats based on user request (Missile mode is fastest, Grenade is heaviest)
-        const speeds = { 1: 30, 2: 40, 3: 65, 4: 10 };
+        // Tuned stats based on user request (Boosted ranges to survive the entire Void expanse)
+        const speeds = { 1: 120, 2: 180, 3: 65, 4: 10 };
         const radii = { 1: 0.22, 2: 0.10, 3: 0.16, 4: 0.55 };
-        const lifetimes = { 1: 3000, 2: 1500, 3: 2500, 4: 2000 };
+        const lifetimes = { 1: 15000, 2: 10000, 3: 2500, 4: 2000 };
         const scores = { 1: 10, 2: 5, 3: 8, 4: 25 };
 
         const speed = speeds[fireMode] ?? 22;
@@ -1333,7 +1462,7 @@ class DioramaScene {
         switch (this.cameraMode) {
             case 0: // Free Roam
                 // Apply dynamic camera parallax and offset calculations
-                this.applyParallax();
+                this.applyParallax(dt);
 
                 // Override camera if hand gesture aiming in Free Roam
                 if (this.inputManager && this.inputManager.gestureAimActive) {
@@ -1359,7 +1488,9 @@ class DioramaScene {
                     const orbitQuat = yawQuat.multiply(pitchQuat);
 
                     const offset = new THREE.Vector3(0, 4.35, -6).applyQuaternion(orbitQuat);
-                    const targetCamPos = mechaPos.clone().add(offset);
+                    let targetCamPos = mechaPos.clone().add(offset);
+                    const centerPoint = mechaPos.clone().add(new THREE.Vector3(0, 4.35, 0));
+                    targetCamPos = this._applyCameraCollision(centerPoint, targetCamPos);
                     this.camera.position.lerp(targetCamPos, 0.12);
                     this.camera.lookAt(mechaPos.clone().add(new THREE.Vector3(0, 3.85, 0)));
                     this.camera.clearViewOffset();
@@ -1393,7 +1524,9 @@ class DioramaScene {
                     const orbitQuat = yawQuat.multiply(pitchQuat);
 
                     const shoulderOffset = new THREE.Vector3(0.8, 4.15, -2.8).applyQuaternion(orbitQuat);
-                    const targetCamPos = mechaPos.clone().add(shoulderOffset);
+                    let targetCamPos = mechaPos.clone().add(shoulderOffset);
+                    const centerPoint = mechaPos.clone().add(new THREE.Vector3(0, 4.15, 0));
+                    targetCamPos = this._applyCameraCollision(centerPoint, targetCamPos);
                     this.camera.position.lerp(targetCamPos, 0.18);
 
                     const forward = new THREE.Vector3(0, 0, 1).applyQuaternion(orbitQuat);

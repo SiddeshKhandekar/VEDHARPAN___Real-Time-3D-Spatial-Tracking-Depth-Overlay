@@ -85,6 +85,11 @@ export class InputManager {
     _resolveKeydown(e) {
         const k = e.key.toLowerCase();
         const code = e.code.toLowerCase();
+
+        if (k === 'tab' || code === 'tab') {
+            e.preventDefault(); // Stop browser UI focus jump so we can fly seamlessly!
+        }
+
         const action = this._keyToAction[k] || this._keyToAction[code];
 
         // ── Movement ───────────────────────────────────────────

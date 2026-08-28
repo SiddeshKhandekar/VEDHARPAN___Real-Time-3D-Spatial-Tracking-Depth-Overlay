@@ -74,27 +74,41 @@ export class MechaController {
         // 1. Oval Shield Mesh (layered glass + glowing wireframe)
         // Using a squished Icosahedron generates a beautiful repeating triangular geodesic lattice (classic sci-fi shield grid)
         // instead of basic horizontal/vertical modeling loops. It forms a thin 'contact lens' shape when z-scaled!
-        const shieldGeo = new THREE.IcosahedronGeometry(1.0, 3);
-        const glassMat = new THREE.MeshPhysicalMaterial({
+        const shieldGeoHigh = new THREE.IcosahedronGeometry(1.0, 3);
+        const shieldGeoLow = new THREE.IcosahedronGeometry(1.0, 0); // 0 subdivision = sparse, chunky distinct sci-fi lines perfect for distance
+
+        this.glassMat = new THREE.MeshPhysicalMaterial({
             color: 0x00f2fe, emissive: 0x00f2fe, emissiveIntensity: 0.15,
-            transparent: true, opacity: 0.25, transmission: 0.7, roughness: 0.1, depthWrite: false, side: THREE.DoubleSide
+            transparent: true, opacity: 0.25, transmission: 0.7, roughness: 0.1, depthWrite: false, side: THREE.DoubleSide, fog: false
         });
-        const wireMat = new THREE.MeshBasicMaterial({
-            color: 0x4facfe, wireframe: true, transparent: true, opacity: 0.25, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide
+        this.wireMat = new THREE.MeshBasicMaterial({
+            color: 0x4facfe, wireframe: true, transparent: true, opacity: 0.25, depthWrite: false, blending: THREE.NormalBlending, side: THREE.DoubleSide, fog: false
         });
 
-        this.shieldGlass = new THREE.Mesh(shieldGeo, glassMat);
-        this.shieldWire = new THREE.Mesh(shieldGeo, wireMat);
+        this.shieldGlass = new THREE.Mesh(shieldGeoHigh, this.glassMat);
+
+        // We clone wireMat to allow independent opacity fading during crossfade
+        this.wireMatHigh = this.wireMat.clone();
+        this.wireMatLow = this.wireMat.clone();
+
+        this.wireHigh = new THREE.Mesh(shieldGeoHigh, this.wireMatHigh);
+        this.wireLow = new THREE.Mesh(shieldGeoLow, this.wireMatLow);
 
         // Expand vertically and slightly horizontally to cover the legs and entire body
         this.shieldGlass.scale.set(1.5, 2.7, 0.4);
-        this.shieldWire.scale.set(1.51, 2.71, 0.41);
+        this.wireHigh.scale.set(1.51, 2.71, 0.41);
+        this.wireLow.scale.set(1.51, 2.71, 0.41);
 
         // Lower the shield mesh to properly cover legs 
         this.shieldGlass.position.set(0, 2.0, 1.8);
-        this.shieldWire.position.set(0, 2.0, 1.8);
+        this.wireHigh.position.set(0, 2.0, 1.8);
+        this.wireLow.position.set(0, 2.0, 1.8);
+
         this.shieldGroup.add(this.shieldGlass);
-        this.shieldGroup.add(this.shieldWire);
+        this.shieldGroup.add(this.wireHigh);
+        this.shieldGroup.add(this.wireLow);
+
+
 
         // 2. Projector Beam (from stomach to shield center)
         // Stomach offset: (0, 2.0, 0). Shield center: (0, 2.0, 1.8)
@@ -102,7 +116,7 @@ export class MechaController {
         const dist = diff.length();
         const beamGeo = new THREE.CylinderGeometry(0.2, 0.05, dist, 12, 1, true); // wider at shield, narrow at stomach
         const beamMat = new THREE.MeshBasicMaterial({
-            color: 0x00f2fe, transparent: true, opacity: 0.3, depthWrite: false, blending: THREE.AdditiveBlending
+            color: 0x00f2fe, transparent: true, opacity: 0.3, depthWrite: false, blending: THREE.NormalBlending
         });
         const beamMesh = new THREE.Mesh(beamGeo, beamMat);
         beamMesh.position.copy(new THREE.Vector3(0, 2.0, 0).lerp(new THREE.Vector3(0, 2.0, 1.8), 0.5));
@@ -128,6 +142,7 @@ export class MechaController {
     }
 
     update(inputManager, dt) {
+        if (this.shieldWireLOD) this.shieldWireLOD.update(this.camera);
         // Move Input Processing
         const moveDir = new THREE.Vector3();
 
@@ -288,13 +303,34 @@ export class MechaController {
                 }
             }
 
-            // Sync other materials 
-            this.shieldGlass.material.color.copy(this.activeShieldColor);
-            this.shieldGlass.material.emissive.copy(this.activeShieldColor);
-            this.shieldWire.material.color.copy(this.activeShieldColor);
+            // Smoothly crossfade LOD opacities based on distance between 70 and 110 units
+            const dist = this.mesh.position.distanceTo(this.camera.position);
+            const fadeStart = 70.0;
+            const fadeEnd = 110.0;
 
-            this.shieldGlass.material.opacity = currentOpacity;
-            this.shieldWire.material.opacity = currentOpacity;
+            let highAlpha = 1.0;
+            let lowAlpha = 0.0;
+
+            if (dist > fadeStart) {
+                if (dist > fadeEnd) {
+                    highAlpha = 0.0;
+                    lowAlpha = 1.0;
+                } else {
+                    lowAlpha = (dist - fadeStart) / (fadeEnd - fadeStart);
+                    highAlpha = 1.0 - lowAlpha;
+                }
+            }
+
+            // Sync other materials 
+            this.glassMat.color.copy(this.activeShieldColor);
+            this.glassMat.emissive.copy(this.activeShieldColor);
+
+            this.wireMatHigh.color.copy(this.activeShieldColor);
+            this.wireMatLow.color.copy(this.activeShieldColor);
+
+            this.glassMat.opacity = currentOpacity;
+            this.wireMatHigh.opacity = currentOpacity * highAlpha;
+            this.wireMatLow.opacity = currentOpacity * lowAlpha;
         } else {
             this.shieldBlinkPhase = 0; // reset for next deployment
         }

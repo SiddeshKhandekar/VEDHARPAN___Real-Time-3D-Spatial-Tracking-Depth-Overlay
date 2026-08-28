@@ -11,18 +11,22 @@
     left: 0;
     width: 100vw;
     height: 100vh;
-    background: rgba(0, 0, 0, 0.82);
-    backdrop-filter: blur(18px);
-    -webkit-backdrop-filter: blur(18px);
+    background: #080c10;
     z-index: 200;
     display: flex;
     flex-direction: column;
     align-items: center;
     overflow-y: auto;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
     padding: 40px 20px 60px;
     box-sizing: border-box;
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
     color: #e0e6f0;
+}
+
+#settings-panel::-webkit-scrollbar {
+    display: none;
 }
 
 /* ── Header ─────────────────────────────────────────────────── */

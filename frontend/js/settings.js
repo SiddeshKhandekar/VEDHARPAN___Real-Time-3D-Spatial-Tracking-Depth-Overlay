@@ -33,13 +33,16 @@ export const ACTIONS = {
     openMenu: { label: 'Open / Close Menu', group: 'system', defaultKey: 'escape', displayDefault: 'Escape' },
 
     // ── Free Roam Camera (Numpad) ─────────────────────────────────────────
-    freeRoamForward: { label: 'Free Roam: Move Forward', group: 'freeRoam', defaultKey: 'numpad8', displayDefault: 'Num 8' },
-    freeRoamBackward: { label: 'Free Roam: Move Backward', group: 'freeRoam', defaultKey: 'numpad2', displayDefault: 'Num 2' },
-    freeRoamLeft: { label: 'Free Roam: Strafe Left', group: 'freeRoam', defaultKey: 'numpad4', displayDefault: 'Num 4' },
-    freeRoamRight: { label: 'Free Roam: Strafe Right', group: 'freeRoam', defaultKey: 'numpad6', displayDefault: 'Num 6' },
-    camUp: { label: 'Free Roam: Camera Up', group: 'freeRoam', defaultKey: 'numpad7', displayDefault: 'Num 7' },
-    camDown: { label: 'Free Roam: Camera Down', group: 'freeRoam', defaultKey: 'numpad9', displayDefault: 'Num 9' },
-    freeRoamRecenter: { label: 'Free Roam: Recenter', group: 'freeRoam', defaultKey: 'numpad5', displayDefault: 'Num 5' },
+    frForward: { label: 'Free Roam: Move Forward', group: 'freeRoam', defaultKey: 'numpad8', displayDefault: 'Num 8' },
+    frBackward: { label: 'Free Roam: Move Backward', group: 'freeRoam', defaultKey: 'numpad2', displayDefault: 'Num 2' },
+    frLeft: { label: 'Free Roam: Strafe Left', group: 'freeRoam', defaultKey: 'numpad1', displayDefault: 'Num 1' },
+    frRight: { label: 'Free Roam: Strafe Right', group: 'freeRoam', defaultKey: 'numpad3', displayDefault: 'Num 3' },
+    frRotLeft: { label: 'Free Roam: Rotate Left', group: 'freeRoam', defaultKey: 'numpad4', displayDefault: 'Num 4' },
+    frRotRight: { label: 'Free Roam: Rotate Right', group: 'freeRoam', defaultKey: 'numpad6', displayDefault: 'Num 6' },
+    frUp: { label: 'Free Roam: Camera Up', group: 'freeRoam', defaultKey: 'numpad7', displayDefault: 'Num 7' },
+    frDown: { label: 'Free Roam: Camera Down', group: 'freeRoam', defaultKey: 'numpad9', displayDefault: 'Num 9' },
+    frFlight: { label: 'Free Roam: Flight Mode', group: 'freeRoam', defaultKey: 'tab', displayDefault: 'Tab' },
+    frRecenter: { label: 'Free Roam: Recenter', group: 'freeRoam', defaultKey: 'numpad5', displayDefault: 'Num 5' },
 };
 
 // ── Default graphics / mouse settings ────────────────────────────────────────
