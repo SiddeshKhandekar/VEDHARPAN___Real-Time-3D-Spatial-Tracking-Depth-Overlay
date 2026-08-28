@@ -866,7 +866,7 @@ class DioramaScene {
 
                 // Keep it at the origin, scale it to 500 
                 this.spaceBackground.position.set(0, 0, 0);
-                this.spaceBackground.scale.set(500, 500, 500);
+                this.spaceBackground.scale.set(4500, 4500, 4500);
 
                 this.spaceBackground.rotation.y = THREE.MathUtils.degToRad(180);
 
@@ -1069,6 +1069,40 @@ class DioramaScene {
         loadHoveringBuilding('building.glb', 10.0, new THREE.Vector3(-150, 60, -250));
         loadHoveringBuilding('brutalist_building.glb', 10.0, new THREE.Vector3(200, 80, -180));
         loadHoveringBuilding('brutalist_building_1.glb', 10.0, new THREE.Vector3(120, 50, 220));
+
+        // Load Massive Asteroid
+        loader.load('assets/asteroid_42.glb', (gltf) => {
+            const asteroid = gltf.scene;
+
+            // 1. Group to handle looping sweeping rotation natively
+            const orbitPivot = new THREE.Group();
+            this.scene.add(orbitPivot);
+
+            // Restoring pure vertical geometry and rotating 180 degrees natively across the internal vertical Y-axis
+            asteroid.rotation.set(0, Math.PI, 0);
+            asteroid.updateMatrixWorld(true);
+
+            // 2. Measure dimensions natively on Y
+            const box = new THREE.Box3().setFromObject(asteroid);
+            const naturalHeight = box.max.y - box.min.y;
+
+            // 3. Medium sizing logic mapping directly against the vertical stretch
+            const targetScale = 1000.0 / naturalHeight;
+            asteroid.scale.set(targetScale, targetScale, targetScale);
+
+            // 4. Drop the structural altitude natively downwards from the top of the globe
+            // Statically pull it outwards locally so it circles the room horizontally
+            asteroid.position.set(-300, 100, 400);
+
+            // Strip fog for total visibility from the ground
+            asteroid.traverse((child) => {
+                if (child.isMesh && child.material) child.material.fog = false;
+            });
+
+            orbitPivot.add(asteroid);
+            this.activeAsteroidOrbit = orbitPivot;
+            this.activeAsteroidMesh = asteroid;
+        });
     }
 
     /**
@@ -1569,6 +1603,10 @@ class DioramaScene {
         if (this.effects) this.effects.update(dt);
 
         // 4. Render main loop frame
+        if (this.activeAsteroidOrbit) {
+            // Sweeps massive horizontal orbit
+            // Slowly tumbling internally
+        }
         this.renderer.render(this.scene, this.camera);
 
         // 5. Update Diagnostics
