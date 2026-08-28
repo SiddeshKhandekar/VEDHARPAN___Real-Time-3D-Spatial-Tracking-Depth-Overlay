@@ -80,7 +80,7 @@ export class MechaController {
             transparent: true, opacity: 0.25, transmission: 0.7, roughness: 0.1, depthWrite: false, side: THREE.DoubleSide
         });
         const wireMat = new THREE.MeshBasicMaterial({
-            color: 0x4facfe, wireframe: true, transparent: true, opacity: 0.25, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide
+            color: 0x4facfe, wireframe: true, transparent: true, opacity: 0.25, depthWrite: false, blending: THREE.NormalBlending, side: THREE.DoubleSide
         });
 
         this.shieldGlass = new THREE.Mesh(shieldGeo, glassMat);
@@ -95,6 +95,24 @@ export class MechaController {
         this.shieldWire.position.set(0, 2.0, 1.8);
         this.shieldGroup.add(this.shieldGlass);
         this.shieldGroup.add(this.shieldWire);
+
+        // 4. Long-Range Navigation Halo (Billboard Sprite)
+        const canvas = document.createElement('canvas');
+        canvas.width = 128; canvas.height = 128;
+        const ctx = canvas.getContext('2d');
+        const gradient = ctx.createRadialGradient(64, 64, 0, 64, 64, 64);
+        gradient.addColorStop(0.0, 'rgba(255, 255, 255, 1)');
+        gradient.addColorStop(0.2, 'rgba(0, 242, 254, 0.8)');
+        gradient.addColorStop(1.0, 'rgba(0, 242, 254, 0)');
+        ctx.fillStyle = gradient;
+        ctx.fillRect(0, 0, 128, 128);
+        
+        const haloTex = new THREE.CanvasTexture(canvas);
+        const haloMat = new THREE.SpriteMaterial({ map: haloTex, color: 0xffffff, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false });
+        this.shieldHalo = new THREE.Sprite(haloMat);
+        this.shieldHalo.scale.set(12.0, 12.0, 1.0);
+        this.shieldHalo.position.set(0, 2.0, 0); // Core center
+        this.shieldGroup.add(this.shieldHalo);
 
         // 2. Projector Beam (from stomach to shield center)
         // Stomach offset: (0, 2.0, 0). Shield center: (0, 2.0, 1.8)
@@ -288,13 +306,25 @@ export class MechaController {
                 }
             }
 
+            // Prevent Moiré pattern blowout from far away by mathematically starving the opacity 
+            const dist = this.mesh.position.distanceTo(this.camera.position);
+            const distanceFader = Math.max(0.0, 1.0 - (dist / 150.0)); // Fades wireframe completely beyond 150 units
+
             // Sync other materials 
             this.shieldGlass.material.color.copy(this.activeShieldColor);
             this.shieldGlass.material.emissive.copy(this.activeShieldColor);
             this.shieldWire.material.color.copy(this.activeShieldColor);
 
             this.shieldGlass.material.opacity = currentOpacity;
-            this.shieldWire.material.opacity = currentOpacity;
+            this.shieldWire.material.opacity = currentOpacity * distanceFader;
+            
+            // Halo completely invisible within 30 units. Fades in smoothly between 30->100 units.
+            let haloOpacity = 0.0;
+            if (dist > 30.0) {
+                haloOpacity = Math.min(1.0, (dist - 30) / 70.0);
+            }
+            this.shieldHalo.material.opacity = haloOpacity * (currentOpacity * 4.0); // Boost sprite visibility
+            this.shieldHalo.material.color.copy(this.activeShieldColor);
         } else {
             this.shieldBlinkPhase = 0; // reset for next deployment
         }

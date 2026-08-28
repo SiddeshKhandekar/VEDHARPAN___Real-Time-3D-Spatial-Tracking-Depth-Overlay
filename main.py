@@ -53,7 +53,7 @@ from typing import Set
 import websockets
 from websockets.asyncio.server import ServerConnection
 
-from vision_pipeline import TelemetryFrame, VisionPipeline
+from core.vision_pipeline import TelemetryFrame, VisionPipeline
 
 
 # ---------------------------------------------------------------------------
@@ -420,7 +420,7 @@ class Application:
         self._async_thread.start()
 
         # 3. Start the PyQt6 GUI on the main thread
-        from gui_overlay import TransparentOverlay
+        from core.gui_overlay import TransparentOverlay
         from PyQt6.QtWidgets import QApplication
 
         # Force hardware WebGL and shared context initialization

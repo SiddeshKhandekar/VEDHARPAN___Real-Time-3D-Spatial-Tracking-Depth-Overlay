@@ -1066,7 +1066,7 @@ class DioramaScene {
         };
 
         // Pass the filename, scale, and a fixed position hovering randomly in space away from the hall
-        loadHoveringBuilding('building.glb', 10.0, new THREE.Vector3(-150, 60, -250));
+        loadHoveringBuilding('assets/building.glb', 10.0, new THREE.Vector3(-150, 60, -250));
         loadHoveringBuilding('brutalist_building.glb', 10.0, new THREE.Vector3(200, 80, -180));
         loadHoveringBuilding('brutalist_building_1.glb', 10.0, new THREE.Vector3(120, 50, 220));
     }
