@@ -1103,6 +1103,42 @@ class DioramaScene {
             this.activeAsteroidOrbit = orbitPivot;
             this.activeAsteroidMesh = asteroid;
         });
+
+        // Load Second Asteroid (Tunnel System) explicit bypass
+        loader.load('assets/asteroid_with_internal_tunnel_system.glb', (gltf) => {
+            const tunnelAsteroid = gltf.scene;
+            // Force horizontal alignment exactly like original asteroid parameters
+            tunnelAsteroid.rotation.set(0, 0, 0);
+            tunnelAsteroid.updateMatrixWorld(true);
+
+            const tBox = new THREE.Box3().setFromObject(tunnelAsteroid);
+            const naturalHeight = tBox.max.y - tBox.min.y;
+
+            const targetScale = 200.0 / naturalHeight;
+            tunnelAsteroid.scale.set(targetScale, targetScale, targetScale);
+
+            // Physically buried directly underneath the atmospheric bounds of the hovering halls
+            tunnelAsteroid.position.set(150, -200, 0);
+
+            tunnelAsteroid.traverse((child) => {
+                if (child.isMesh) {
+                    // Procedurally strip the native generic GLTF material wrapper and mathematically generate a jagged rock texture
+                    child.material = new THREE.MeshStandardMaterial({
+                        color: 0x47423d,        // Deep meteorite grey-brown
+                        roughness: 0.95,        // Utterly unreflective
+                        metalness: 0.1,         // Flat rock consistency
+                        flatShading: true,      // Forces every single geometric polygon to render distinctly (creating jagged crags artificially!)
+                        fog: false
+                    });
+
+                    // Enforce geometry update so flat shading computes strictly against the vertices inherently
+                    if (child.geometry) child.geometry.computeVertexNormals();
+                }
+            });
+
+            this.scene.add(tunnelAsteroid);
+            this.activeTunnelAsteroidMesh = tunnelAsteroid;
+        });
     }
 
     /**
