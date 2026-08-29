@@ -204,9 +204,11 @@ class DioramaScene {
             btnQuit.addEventListener('click', () => {
                 if (this.socket && this.socket.readyState === WebSocket.OPEN) {
                     this.socket.send(JSON.stringify({ command: "shutdown" }));
-                } else {
-                    window.close(); // Fallback if no socket connection
                 }
+
+                // CRITICAL: Force the browser window destruction universally via the JS API which natively bridges 
+                // to PyQt's `windowCloseRequested` signal on the backend gracefully dropping the GUI thread!
+                setTimeout(() => window.close(), 250);
             });
         }
 

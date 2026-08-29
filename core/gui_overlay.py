@@ -96,6 +96,9 @@ class TransparentOverlay(QMainWindow):
             )
         self.web_view.page().featurePermissionRequested.connect(handle_permission)
 
+        # Bridge Javascript's `window.close()` explicitly to the Qt Window's native C++ `.close()` termination pipeline
+        self.web_view.page().windowCloseRequested.connect(self.close)
+
         self.setCentralWidget(self.web_view)
 
     def resizeEvent(self, event: QResizeEvent) -> None:
