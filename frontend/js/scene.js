@@ -1153,6 +1153,9 @@ class DioramaScene {
             // Statically pull it outwards locally so it circles the room horizontally
             asteroid.position.set(-300, 100, 400);
 
+            // Explicitly force position and scale parameters to mathematically resolve in engine before extracting vertices for Cannon JS Trimesh!
+            asteroid.updateMatrixWorld(true);
+
             // Strip fog for total visibility from the ground
             asteroid.traverse((child) => {
                 if (child.isMesh) {
@@ -1182,6 +1185,9 @@ class DioramaScene {
 
             // Physically buried directly underneath the atmospheric bounds of the hovering halls
             tunnelAsteroid.position.set(150, -200, 0);
+
+            // Explicitly force position and scale parameters to mathematically resolve in engine before extracting vertices for Cannon JS Trimesh!
+            tunnelAsteroid.updateMatrixWorld(true);
 
             tunnelAsteroid.traverse((child) => {
                 if (child.isMesh) {
