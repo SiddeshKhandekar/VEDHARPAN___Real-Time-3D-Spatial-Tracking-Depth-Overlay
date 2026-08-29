@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import * as CANNON from 'cannon-es';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
 import { PhysicsWorld } from './physics_world.js';
 import { InputManager } from './input_manager.js';
 import { VisualEffects } from './effects.js';
@@ -133,10 +134,27 @@ class DioramaScene {
         // 5. Create Dynamic Hand Shadow Occluder Mesh
         this.createHandRigs();
 
-        // 6. Load Assets
-        this.loadAssets();
+        // 6. Initialize Core Systems first (Must exist BEFORE GLTF parse callbacks bind Trimesh)
+        this.physicsWorld = new PhysicsWorld();
+        this.inputManager = new InputManager(this.camera, this.renderer.domElement);
+        this.settingsManager.applyToInputManager(this.inputManager);
+        this.effects = new VisualEffects(this.scene);
 
-        // 7. Event Listeners
+        // 7. Load Assets (Blocks rendering specifically until finished via the callback)
+        this.loadAssets(() => {
+            // 8. Start Rendering Loop
+            this.animate();
+
+            if (sessionStorage.getItem('vedharpan_autostart_newgame')) {
+                sessionStorage.removeItem('vedharpan_autostart_newgame');
+                setTimeout(() => {
+                    const startBtn = document.getElementById('btn-start');
+                    if (startBtn) startBtn.click();
+                }, 250);
+            }
+        });
+
+        // 9. Event Listeners
         window.addEventListener('resize', () => this.onWindowResize());
 
 
@@ -379,28 +397,6 @@ class DioramaScene {
         // Highlight mode 1 as default active on load
         meterEls[1]?.card.classList.add('active');
 
-        // 8. Connect to WebSocket Telemetry Server
-        this.connectTelemetry();
-
-        // 9. Initialize Systems
-        this.physicsWorld = new PhysicsWorld();
-
-        this.inputManager = new InputManager(this.camera, this.renderer.domElement);
-        // Apply saved keybindings from SettingsManager immediately
-        this.settingsManager.applyToInputManager(this.inputManager);
-        this.effects = new VisualEffects(this.scene);
-
-        // 10. Start Rendering Loop
-        this.animate();
-
-        if (sessionStorage.getItem('vedharpan_autostart_newgame')) {
-            sessionStorage.removeItem('vedharpan_autostart_newgame');
-            // Allow renderer a split second to breathe before locking pointer
-            setTimeout(() => {
-                const startBtn = document.getElementById('btn-start');
-                if (startBtn) startBtn.click();
-            }, 250);
-        }
     }
 
     /**
@@ -771,8 +767,46 @@ class DioramaScene {
     /**
      * Load GLB assets from the assets directory and configure shadow casting/receiving.
      */
-    loadAssets() {
-        const loader = new GLTFLoader();
+    loadAssets(onComplete) {
+        const loadingManager = new THREE.LoadingManager(
+            () => {
+                const bootOverlay = document.getElementById('boot-overlay');
+
+                // CRITICAL GPU OPTIMIZATION: Force compilation of all complex ShaderMaterials off-screen completely synchronously BEFORE dropping the Loading UI.
+                // This eliminates the savage lag spike when heavy Asteroid/Room geometry suddenly impacts the frustum natively!
+                try {
+                    this.renderer.compile(this.scene, this.camera);
+                } catch (e) {
+                    console.warn("GPU compilation hook suppressed:", e);
+                }
+
+                setTimeout(() => {
+                    if (bootOverlay) {
+                        bootOverlay.style.opacity = '0';
+                        setTimeout(() => bootOverlay.style.display = 'none', 500);
+                    }
+                    if (onComplete) onComplete();
+                }, 100);
+
+                // Connect WebSocket strictly explicitly *after* physics loop unlocks
+                this.connectTelemetry();
+            },
+            (url, itemsLoaded, itemsTotal) => {
+                const bootProgress = document.getElementById('boot-progress-bar');
+                const bootText = document.getElementById('boot-status-text');
+                const percent = Math.floor((itemsLoaded / itemsTotal) * 100);
+                if (bootProgress) bootProgress.style.width = percent + '%';
+                if (bootText) bootText.textContent = `INITIALIZING SCENE... (${percent}%)`;
+            }
+        );
+
+        const loader = new GLTFLoader(loadingManager);
+
+        // Formally configure massive DRACO decompression WASM buffers natively to scale down loading times drastically block-by-block
+        const dracoLoader = new DRACOLoader();
+        dracoLoader.setDecoderPath('https://unpkg.com/three@0.165.0/examples/jsm/libs/draco/');
+        loader.setDRACOLoader(dracoLoader);
+
         const assetPath = 'assets/';
 
         // Helper to enable shadows recursively on imported model nodes

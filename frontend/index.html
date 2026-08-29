@@ -29,6 +29,30 @@
 </head>
 
 <body>
+    <!-- Engine Pre-loader Overlay -->
+    <div id="boot-overlay"
+        style="position: fixed; inset: 0; z-index: 999999; background: url('poster/mecha loading screen poster.png') center/cover no-repeat; display: flex; flex-direction: column; transition: opacity 0.5s;">
+        <!-- Push the loading strip explicitly to the absolute bottom -->
+        <div style="flex: 1;"></div>
+
+        <!-- The bottom strip -->
+        <div
+            style="width: 100%; display: flex; flex-direction: column; background: rgba(0,0,0,0.8); padding: 15px 30px; box-sizing: border-box; backdrop-filter: blur(5px); border-top: 2px solid rgba(0, 255, 255, 0.4);">
+            <div
+                style="display: flex; justify-content: space-between; font-family: 'Orbitron', monospace; color: cyan; font-weight: bold; font-size: 1.2rem; margin-bottom: 12px; text-shadow: 0 0 10px cyan;">
+                <span style="letter-spacing: 3px;">VEDHARPAN SECURE BOOT</span>
+                <span id="boot-status-text" style="letter-spacing: 1px;">INITIALIZING HARDWARE... (0%)</span>
+            </div>
+            <!-- Full width horizontal bar -->
+            <div
+                style="width: 100%; height: 12px; background: rgba(0, 255, 255, 0.1); border-radius: 6px; overflow: hidden; box-shadow: inset 0 0 8px rgba(0,0,0,0.5);">
+                <div id="boot-progress-bar"
+                    style="width: 0%; height: 100%; background: cyan; transition: width 0.1s ease-out; box-shadow: 0 0 15px cyan;">
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- Main WebGL rendering canvas -->
     <canvas id="viewport"></canvas>
 
