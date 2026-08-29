@@ -955,8 +955,53 @@ class DioramaScene {
                 this.scene.add(this.spaceBackground);
                 console.log('Loaded: Space 360 Background');
             },
-            undefined,
             (error) => console.error('Error loading Space Globe:', error)
+        );
+
+        // 3.5. Load Space Train Orbital Boundary
+        this.spaceTrainRig = new THREE.Group();
+        this.scene.add(this.spaceTrainRig);
+
+        loader.load(
+            `${assetPath}space_train.glb`,
+            (gltf) => {
+                const trainClone = gltf.scene;
+
+                // Scale proportionally: target length ~1500 units (make it extremely big)
+                const tBox = new THREE.Box3().setFromObject(trainClone);
+                const size = tBox.getSize(new THREE.Vector3());
+                const maxDim = Math.max(size.x, size.y, size.z);
+                const tScale = 1500 / maxDim;
+                trainClone.scale.set(tScale, tScale, tScale);
+
+                // Position train at X=2200 to hug the space_globe boundary
+                trainClone.position.set(2200, 0, 0);
+
+                // Orient the train to travel tangentially (towards positive Z natively as Rig rotates negatively).
+                trainClone.lookAt(new THREE.Vector3(2200, 0, 1000));
+
+                // Rotate by 90 degrees since the model's native "front" is actually its side
+                trainClone.rotateY(Math.PI / 2);
+
+                // Disable shadows and fog for performance on 65MB mesh
+                trainClone.traverse((child) => {
+                    if (child.isMesh) {
+                        // EXPLICIT: Push into global array so the Physics Cloak diagnostic tool targets it natively!
+                        this.collidableMeshes.push(child);
+
+                        child.castShadow = false;
+                        child.receiveShadow = false;
+                        if (child.material) {
+                            child.material.fog = false;
+                        }
+                    }
+                });
+
+                this.spaceTrainRig.add(trainClone);
+                console.log('Loaded: Border-Orbiting Space Train');
+            },
+            undefined,
+            (error) => console.error('Error loading Space Train:', error)
         );
 
         // 4. Load Tires — scattered randomly across the void space
@@ -1696,10 +1741,16 @@ class DioramaScene {
                 if (this.isPhysicsCloakActive) {
                     if (!mesh.userData.originalMaterial) {
                         mesh.userData.originalMaterial = mesh.material;
+                        mesh.userData.originalCastShadow = mesh.castShadow;
+                        mesh.userData.originalReceiveShadow = mesh.receiveShadow;
                     }
+                    mesh.castShadow = false;
+                    mesh.receiveShadow = false;
                     mesh.material = this.physicsCloakMat;
                 } else {
                     if (mesh.userData.originalMaterial) {
+                        mesh.castShadow = mesh.userData.originalCastShadow;
+                        mesh.receiveShadow = mesh.userData.originalReceiveShadow;
                         mesh.material = mesh.userData.originalMaterial;
                     }
                 }
@@ -1987,6 +2038,11 @@ class DioramaScene {
                     }
                 }
             }
+        }
+
+        // 4.5 Orbit Space Train seamlessly
+        if (this.spaceTrainRig) {
+            this.spaceTrainRig.rotation.y -= dt * 0.05; // Sweeping panoramic orbit
         }
 
         this.renderer.render(this.scene, this.camera);
