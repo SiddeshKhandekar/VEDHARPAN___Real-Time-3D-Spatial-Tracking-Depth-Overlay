@@ -1706,14 +1706,33 @@ class DioramaScene {
 
         // Auto-remove
         setTimeout(() => {
-            if (mesh.parent) this.scene.remove(mesh);
+            if (mesh.parent) {
+                this.scene.remove(mesh);
+                this.physicsWorld.world.removeBody(body);
+            }
         }, fireMode === 30 ? 1800 : lifetime);
 
         // Collision → explosion
-        body.addEventListener('collide', () => {
+        body.addEventListener('collide', (e) => {
             if (mesh.parent) {
-                this.effects.createExplosion(mesh.position.clone(), visualMode);
+                let normal = new THREE.Vector3(e.contact.ni.x, e.contact.ni.y, e.contact.ni.z);
+                // ni points from bi -> bj. We want normal pointing OUT of the surface (towards projectile).
+                if (e.contact.bi === body) normal.negate();
+
+                // Offset vertically against the normal so large asteroids don't swallow the particles
+                const expPos = mesh.position.clone().add(normal.multiplyScalar(1.5));
+
+                this.effects.createExplosion(expPos, visualMode);
                 this.scene.remove(mesh);
+
+                // CRITICAL: Defer the physics body removal to avoid breaking Cannon.js
+                // mid-collision loop iteration (`wakeUpAfterNarrowphase` crash)
+                setTimeout(() => {
+                    if (body.world) {
+                        this.physicsWorld.world.removeBody(body);
+                    }
+                }, 0);
+
                 this.score += scores[fireMode] ?? 10;
                 document.getElementById('score').textContent = this.score;
             }

@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
 /**
  * VisualEffects — Handles muzzle flash, 4 plasma fire modes, and impact explosions.
@@ -18,6 +19,7 @@ export class VisualEffects {
         this.explosions = [];
 
         // Pre-allocate Shared Materials and Geometries
+        this.explosionBaseModel = null;
         this._initCache();
     }
 
@@ -92,6 +94,23 @@ export class VisualEffects {
 
         // Utility cache for standard particle geometries
         this._expGeoCache = {};
+
+        // Load custom explosion GLB
+        const loader = new GLTFLoader();
+        loader.load('assets/explosion.glb', (gltf) => {
+            this.explosionBaseModel = gltf.scene;
+            this.explosionBaseModel.traverse((child) => {
+                if (child.isMesh) {
+                    child.material = new THREE.MeshBasicMaterial({
+                        color: 0xffffff, // Template color, overriden on instantiation
+                        transparent: true,
+                        opacity: 1.0,
+                        depthWrite: false,
+                        blending: THREE.AdditiveBlending
+                    });
+                }
+            });
+        }, undefined, (e) => console.error("Failed to load explosion.glb", e));
     }
 
     _getExpGeo(r, segs = 4) {
@@ -172,24 +191,46 @@ export class VisualEffects {
 
         const group = new THREE.Group();
         group.position.copy(position);
-        group.userData.maxLife = cfg.life;
 
-        for (let i = 0; i < cfg.n; i++) {
-            const p = new THREE.Mesh(geo, mat);
-            const dir = new THREE.Vector3(
-                Math.random() - 0.5,
-                Math.random() - 0.5,
-                Math.random() - 0.5
-            ).normalize();
+        // --- CUSTOM GLB OVERRIDE PARA-LOGIC FOR PLASMA (1) AND RAPID (2) ---
+        if ((fireMode === 1 || fireMode === 2) && this.explosionBaseModel) {
+            const expLife = 0.35;
+            group.userData.maxLife = expLife;
 
-            p.userData = {
-                velocity: dir.multiplyScalar(Math.random() * cfg.speed + cfg.speed * 0.4),
-                life: cfg.life,
-                maxLife: cfg.life,
-                // store an individual per-particle scale offset
-                scaleMult: Math.random() * 0.5 + 0.5
-            };
+            const p = this.explosionBaseModel.clone();
+            const color = fireMode === 1 ? 0x9933ff : 0xffaa00; // Purple / Yellow
+
+            p.traverse((child) => {
+                if (child.isMesh) {
+                    child.material = child.material.clone();
+                    child.material.color.setHex(color);
+                }
+            });
+
+            // Force completely horizontal plane (Flat on ground) natively oriented 
+            p.rotation.set(Math.PI / 2, 0, 0);
+
+            p.userData = { life: expLife, maxLife: expLife, isGLB: true };
             group.add(p);
+        } else {
+            // Standard mathematical particle explosion for all other modes natively
+            group.userData.maxLife = cfg.life;
+            for (let i = 0; i < cfg.n; i++) {
+                const p = new THREE.Mesh(geo, mat);
+                const dir = new THREE.Vector3(
+                    Math.random() - 0.5,
+                    Math.random() - 0.5,
+                    Math.random() - 0.5
+                ).normalize();
+
+                p.userData = {
+                    velocity: dir.multiplyScalar(Math.random() * cfg.speed + cfg.speed * 0.4),
+                    life: cfg.life,
+                    maxLife: cfg.life,
+                    scaleMult: Math.random() * 0.5 + 0.5
+                };
+                group.add(p);
+            }
         }
 
         // Shockwave ring for charged shot
@@ -228,8 +269,15 @@ export class VisualEffects {
                     // Expand and fade ring natively
                     const scale = 1 + (1 - t) * 12;
                     p.scale.setScalar(scale);
-                    // Material opacity cannot be animated safely here because it's shared.
-                    // But it's so fast it doesn't matter, or we could use custom shader.
+                } else if (p.userData.isGLB) {
+                    // Aggressively transition scale scaling and opacity decay!
+                    const currentScale = 1.0 + (1 - t) * 2.5;
+                    p.scale.setScalar(currentScale);
+                    p.traverse(c => {
+                        if (c.isMesh && c.material) {
+                            c.material.opacity = Math.max(0, t);
+                        }
+                    });
                 } else {
                     p.position.add(p.userData.velocity);
                     p.userData.velocity.multiplyScalar(0.94); // drag
