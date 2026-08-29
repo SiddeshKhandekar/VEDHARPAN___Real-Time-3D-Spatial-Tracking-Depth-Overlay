@@ -131,6 +131,10 @@ class DioramaScene {
         // 4. Setup Lighting
         this.setupLights();
 
+        // 4.5 Physics Debug Visualizer (Non-transparent to enable Z-Buffer hardware culling, preventing massive GPU line lag)
+        this.physicsCloakMat = new THREE.MeshBasicMaterial({ color: 0x00ffff, wireframe: true, transparent: false });
+        this.isPhysicsCloakActive = false;
+
         // 5. Create Dynamic Hand Shadow Occluder Mesh
         this.createHandRigs();
 
@@ -220,6 +224,12 @@ class DioramaScene {
             const isEscape = e.key === 'Escape' || action === 'openMenu';
             const isToggleCam = e.key.toLowerCase() === 'v' || action === 'toggleCamera';
             const isRespawn = e.key.toLowerCase() === 'n' || action === 'respawn';
+
+            // Physics Cloak Debugger
+            if (action === 'togglePhysicsCloak' || (!action && e.key === '`')) {
+                this.togglePhysicsCloak();
+                return;
+            }
 
             // ESC / Menu Toggle
             if (isEscape) {
@@ -568,7 +578,7 @@ class DioramaScene {
         const groups = {
             'kb-movement-rows': ['moveForward', 'moveBackward', 'moveLeft', 'moveRight', 'jump'],
             'kb-combat-rows': ['fireMode1', 'fireMode2', 'fireMode3', 'fireMode4', 'toggleShield', 'holdShield'],
-            'kb-system-rows': ['toggleCamera', 'respawn', 'openMenu'],
+            'kb-system-rows': ['toggleCamera', 'togglePhysicsCloak', 'respawn', 'openMenu'],
             'kb-freeroam-rows': ['freeRoamForward', 'freeRoamBackward', 'freeRoamLeft', 'freeRoamRight', 'camUp', 'camDown', 'freeRoamRecenter'],
         };
 
@@ -971,6 +981,12 @@ class DioramaScene {
                     configureShadows(tireClone, true, true);
                     this.scene.add(tireClone);
 
+                    tireClone.traverse((child) => {
+                        if (child.isMesh) {
+                            this.collidableMeshes.push(child);
+                        }
+                    });
+
                     // Add to physics with a lighter mass of 5 for explosive deflection
                     const body = this.physicsWorld.addDynamicBody(tireClone, 5, 'cylinder', 0.4);
                     // Crucial: instruct Cannon.js anti-gravity fields in physics_world.js to suspend it
@@ -1020,6 +1036,7 @@ class DioramaScene {
                 // 3. Add Bright White Edge Detail Identifier
                 porscheClone.traverse((child) => {
                     if (child.isMesh) {
+                        this.collidableMeshes.push(child);
                         const edges = new THREE.EdgesGeometry(child.geometry, 15);
                         const line = new THREE.LineSegments(edges, new THREE.LineBasicMaterial({ color: 0xffffff, linewidth: 2.0 }));
                         child.add(line);
@@ -1081,9 +1098,12 @@ class DioramaScene {
                         (Math.random() - 0.5) * 400
                     );
 
-                    // Suppress lighting/fog visual bleeding
+                    // Suppress lighting/fog visual bleeding and push to collision array
                     astClone.traverse((child) => {
-                        if (child.isMesh && child.material) child.material.fog = false;
+                        if (child.isMesh) {
+                            this.collidableMeshes.push(child);
+                            if (child.material) child.material.fog = false;
+                        }
                     });
 
                     configureShadows(astClone, true, true);
@@ -1236,6 +1256,9 @@ class DioramaScene {
                     building.traverse((child) => {
                         if (child.isMesh) {
                             this.physicsWorld.addStaticTrimesh(child);
+
+                            // EXPLICIT: Push into global array so the Physics Cloak diagnostic tool can target it natively!
+                            this.collidableMeshes.push(child);
 
                             // Override material to prevent fading into the background void
                             if (child.material) {
@@ -1654,6 +1677,35 @@ class DioramaScene {
     }
 
     /**
+     * Diagnostic Physics Cloak - Temporarily overwrites all active structural geometries 
+     * inside the physics engine with a translucent Cyan Wireframe verifying geometric bounds.
+     */
+    togglePhysicsCloak() {
+        this.isPhysicsCloakActive = !this.isPhysicsCloakActive;
+        const msg = this.isPhysicsCloakActive ? "Physics Cloak Activated" : "Physics Cloak Deactivated";
+
+        if (this.hudStatus) {
+            this.hudStatus.textContent = msg;
+            this.hudStatus.className = this.isPhysicsCloakActive ? 'connected' : 'connecting'; // Quick color swap
+        }
+
+        if (this.collidableMeshes) {
+            this.collidableMeshes.forEach(mesh => {
+                if (this.isPhysicsCloakActive) {
+                    if (!mesh.userData.originalMaterial) {
+                        mesh.userData.originalMaterial = mesh.material;
+                    }
+                    mesh.material = this.physicsCloakMat;
+                } else {
+                    if (mesh.userData.originalMaterial) {
+                        mesh.material = mesh.userData.originalMaterial;
+                    }
+                }
+            });
+        }
+    }
+
+    /**
      * Spawns a projectile with mode-specific visuals, speed, and impact explosion.
      * @param {THREE.Vector3} position - Barrel tip world position
      * @param {THREE.Vector3} direction - Unit direction vector
@@ -1732,6 +1784,25 @@ class DioramaScene {
                         this.physicsWorld.world.removeBody(body);
                     }
                 }, 0);
+
+                // Apply Artificial Kinetic Impulse to Dynamic targets (Tires, Porsche, Swarm Asteroids)
+                let targetBody = (e.contact.bi === body) ? e.contact.bj : e.contact.bi;
+                if (targetBody && targetBody.mass > 0) {
+                    const forceMultiplier = 250; // Scaled specifically to negate severe mass differentials natively
+                    const impulse = new CANNON.Vec3(
+                        direction.x * forceMultiplier * targetBody.mass,
+                        direction.y * forceMultiplier * targetBody.mass,
+                        direction.z * forceMultiplier * targetBody.mass
+                    );
+                    targetBody.applyImpulse(impulse, new CANNON.Vec3(0, 0, 0)); // Strike the dead center
+
+                    // Introduce chaotic explosive tumbling geometry
+                    targetBody.angularVelocity.set(
+                        (Math.random() - 0.5) * 10,
+                        (Math.random() - 0.5) * 10,
+                        (Math.random() - 0.5) * 10
+                    );
+                }
 
                 this.score += scores[fireMode] ?? 10;
                 document.getElementById('score').textContent = this.score;

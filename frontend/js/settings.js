@@ -29,6 +29,7 @@ export const ACTIONS = {
 
     // ── Camera / System ───────────────────────────────────────────────────
     toggleCamera: { label: 'Toggle Camera Mode', group: 'system', defaultKey: 'v', displayDefault: 'V' },
+    togglePhysicsCloak: { label: 'Toggle Physics Cloak', group: 'system', defaultKey: '`', displayDefault: '`' },
     respawn: { label: 'Respawn Mecha', group: 'system', defaultKey: 'n', displayDefault: 'N' },
     openMenu: { label: 'Open / Close Menu', group: 'system', defaultKey: 'escape', displayDefault: 'Escape' },
 
