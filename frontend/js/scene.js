@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import * as CANNON from 'cannon-es';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { PhysicsWorld } from './physics_world.js';
 import { InputManager } from './input_manager.js';
@@ -866,7 +867,7 @@ class DioramaScene {
 
                 // Keep it at the origin, scale it to 500 
                 this.spaceBackground.position.set(0, 0, 0);
-                this.spaceBackground.scale.set(500, 500, 500);
+                this.spaceBackground.scale.set(4500, 4500, 4500);
 
                 this.spaceBackground.rotation.y = THREE.MathUtils.degToRad(180);
 
@@ -929,15 +930,11 @@ class DioramaScene {
                     body.linearDamping = 0.0;
                     body.angularDamping = 0.0;
 
-                    // Assign a randomized kinetic drift vector
-                    const drift = 4.0;
-                    body.velocity.set(
-                        (Math.random() - 0.5) * drift,
-                        (Math.random() - 0.5) * drift,
-                        (Math.random() - 0.5) * drift
-                    );
+                    // Flag them for Lissajous swarm routing and map an arbitrary offset phase for visual randomness
+                    body.isSwarmProp = true;
+                    body.swarmPhaseOffset = Math.random() * 1000.0;
 
-                    // Assign a slow perpetual tumble
+                    // Assign a slow perpetual tumble to tires
                     body.angularVelocity.set(
                         (Math.random() - 0.5) * 2,
                         (Math.random() - 0.5) * 2,
@@ -950,6 +947,150 @@ class DioramaScene {
             undefined,
             (error) => console.error('Error loading Tires Model:', error)
         );
+
+        // 4.5. Load 911 Singer Twin Turbo randomly tumbling in zero-g
+        loader.load(
+            'assets/porsche_911_singer_twin_turbo.glb',
+            (gltf) => {
+                const porscheClone = gltf.scene;
+
+                // 1. Spawning right in front of the Mecha (Mecha is at 0, 5, 2 looking down Z)
+                // We'll spawn it hovering perfectly in mid-air in front of the stairs!
+                porscheClone.position.set(0, 15, -20);
+                porscheClone.rotation.set(0, 0, 0); // Straight up
+
+                // 2. Measure bounding and scale accurately compared to Mecha
+                const pBox = new THREE.Box3().setFromObject(porscheClone);
+                const pWidth = pBox.max.x - pBox.min.x;
+
+                // Target width: 1.5 units (comparable to Mecha size)
+                const pScale = 1.5 / pWidth;
+                porscheClone.scale.set(pScale, pScale, pScale);
+
+                // 3. Add Bright White Edge Detail Identifier
+                porscheClone.traverse((child) => {
+                    if (child.isMesh) {
+                        const edges = new THREE.EdgesGeometry(child.geometry, 15);
+                        const line = new THREE.LineSegments(edges, new THREE.LineBasicMaterial({ color: 0xffffff, linewidth: 2.0 }));
+                        child.add(line);
+                    }
+                });
+
+                configureShadows(porscheClone, true, true);
+                this.scene.add(porscheClone);
+
+                // Map reference for manual centripetal orbital pull!
+                this.activePorscheObj = porscheClone;
+
+
+                // Add to physics engine dynamically so bullets strike it
+                const body = this.physicsWorld.addDynamicBody(porscheClone, 1500, 'sphere', 1.5);
+                body.ignoreGravity = true;
+                body.linearDamping = 0.0;
+                body.angularDamping = 0.0;
+
+                this.activePorscheBody = body;
+                body.isSwarmProp = true;
+                body.swarmPhaseOffset = 0.0; // Porsche follows the main path exactly
+
+                body.velocity.set(
+                    (Math.random() - 0.5) * 2.0,
+                    (Math.random() - 0.5) * 2.0,
+                    (Math.random() - 0.5) * 2.0
+                );
+                body.angularVelocity.set(
+                    (Math.random() - 0.5),
+                    (Math.random() - 0.5),
+                    (Math.random() - 0.5)
+                );
+
+                console.log('Loaded: Zero-G Porsche Singer');
+            },
+            undefined,
+            (error) => console.error('Error loading Porsche Model:', error)
+        );
+
+        // Universal Swarm Loader for injecting dynamic randomized geometry explicitly into the 3D Lissajous trajectory
+        const spawnSwarmAsteroid = (fileName, targetWidth, mass) => {
+            loader.load(
+                `assets/${fileName}`,
+                (gltf) => {
+                    const astClone = gltf.scene;
+
+                    // Compute absolute native scale to force specific size limits proportionally
+                    astClone.updateMatrixWorld(true);
+                    const pBox = new THREE.Box3().setFromObject(astClone);
+                    const naturalWidth = pBox.max.x - pBox.min.x;
+                    const pScale = targetWidth / naturalWidth;
+                    astClone.scale.set(pScale, pScale, pScale);
+
+                    // Randomly instantiate across the map initially
+                    astClone.position.set(
+                        (Math.random() - 0.5) * 400,
+                        (Math.random() - 0.5) * 400,
+                        (Math.random() - 0.5) * 400
+                    );
+
+                    // Suppress lighting/fog visual bleeding
+                    astClone.traverse((child) => {
+                        if (child.isMesh && child.material) child.material.fog = false;
+                    });
+
+                    configureShadows(astClone, true, true);
+                    this.scene.add(astClone);
+
+                    // Bind it strictly to the Cannon engine mapping its exact mesh limits to a bounding sphere for physics
+                    const radiusScale = targetWidth * 0.5;
+                    const body = this.physicsWorld.addDynamicBody(astClone, mass, 'sphere', radiusScale);
+
+                    body.ignoreGravity = true;
+                    body.linearDamping = 0.0;
+                    body.angularDamping = 0.0;
+
+                    // Bind exactly into the Lissajous loop!
+                    body.isSwarmProp = true;
+                    body.swarmPhaseOffset = Math.random() * 2000.0;
+
+                    // Setup Kinetic Explosive Trigger native to the Cannon Event Framework!
+                    body.addEventListener("collide", (e) => {
+                        if (e.contact) {
+                            const velocityImpact = Math.abs(e.contact.getImpactVelocityAlongNormal());
+                            if (velocityImpact > 1.5) { // Threshold suppresses tiny gentle grazing bumps
+                                const contactPoint = e.contact.rj;
+                                const rigidPos = body.position;
+                                // Resolve absolute geometry coordinate mapping
+                                const visualImpactPoint = new THREE.Vector3(
+                                    rigidPos.x + contactPoint.x,
+                                    rigidPos.y + contactPoint.y,
+                                    rigidPos.z + contactPoint.z
+                                );
+                                // Visually deploy the sparks/dust locally from effects.js!
+                                if (this.effects) {
+                                    this.effects.createExplosion(visualImpactPoint, 2);
+                                }
+                            }
+                        }
+                    });
+
+                },
+                undefined,
+                (err) => console.error(`Error generating dynamic swarm object ${fileName}:`, err)
+            );
+        };
+
+        // Mathematically deploy the structural varieties (2 clones of each to avoid utterly nuking the framerate)
+        for (let i = 0; i < 2; i++) {
+            // wandering_asteroids_of_andromeda -> Medium 
+            spawnSwarmAsteroid('wandering_asteroids_of_andromeda.glb', 15.0, 800.0);
+
+            // asteroid_field_100_x_medium-poly -> Small
+            spawnSwarmAsteroid('asteroid_field_100_x_medium-poly.glb', 40.0, 1500.0);
+
+            // asteroid.glb -> Big 
+            spawnSwarmAsteroid('asteroid.glb', 25.0, 2500.0);
+        }
+
+
 
         // 5. Load City Map
         loader.load(
@@ -1069,6 +1210,90 @@ class DioramaScene {
         loadHoveringBuilding('building.glb', 10.0, new THREE.Vector3(-150, 60, -250));
         loadHoveringBuilding('brutalist_building.glb', 10.0, new THREE.Vector3(200, 80, -180));
         loadHoveringBuilding('brutalist_building_1.glb', 10.0, new THREE.Vector3(120, 50, 220));
+
+        // Load Massive Asteroid
+        loader.load('assets/asteroid_42.glb', (gltf) => {
+            const asteroid = gltf.scene;
+
+            // 1. Group to handle looping sweeping rotation natively
+            const orbitPivot = new THREE.Group();
+            this.scene.add(orbitPivot);
+
+            // Restoring pure vertical geometry and rotating 180 degrees natively across the internal vertical Y-axis
+            asteroid.rotation.set(0, Math.PI, 0);
+            asteroid.updateMatrixWorld(true);
+
+            // 2. Measure dimensions natively on Y
+            const box = new THREE.Box3().setFromObject(asteroid);
+            const naturalHeight = box.max.y - box.min.y;
+
+            // 3. Medium sizing logic mapping directly against the vertical stretch
+            const targetScale = 1000.0 / naturalHeight;
+            asteroid.scale.set(targetScale, targetScale, targetScale);
+
+            // 4. Drop the structural altitude natively downwards from the top of the globe
+            // Statically pull it outwards locally so it circles the room horizontally
+            asteroid.position.set(-300, 100, 400);
+
+            // Explicitly force position and scale parameters to mathematically resolve in engine before extracting vertices for Cannon JS Trimesh!
+            asteroid.updateMatrixWorld(true);
+
+            // Strip fog for total visibility from the ground
+            asteroid.traverse((child) => {
+                if (child.isMesh) {
+                    if (child.material) child.material.fog = false;
+                    this.physicsWorld.addStaticTrimesh(child);
+                    this.collidableMeshes.push(child);
+                }
+            });
+
+            orbitPivot.add(asteroid);
+            this.activeAsteroidOrbit = orbitPivot;
+            this.activeAsteroidMesh = asteroid;
+        });
+
+        // Load Second Asteroid (Tunnel System) explicit bypass
+        loader.load('assets/asteroid_with_internal_tunnel_system.glb', (gltf) => {
+            const tunnelAsteroid = gltf.scene;
+            // Force horizontal alignment exactly like original asteroid parameters
+            tunnelAsteroid.rotation.set(0, 0, 0);
+            tunnelAsteroid.updateMatrixWorld(true);
+
+            const tBox = new THREE.Box3().setFromObject(tunnelAsteroid);
+            const naturalHeight = tBox.max.y - tBox.min.y;
+
+            const targetScale = 200.0 / naturalHeight;
+            tunnelAsteroid.scale.set(targetScale, targetScale, targetScale);
+
+            // Physically buried directly underneath the atmospheric bounds of the hovering halls
+            tunnelAsteroid.position.set(150, -200, 0);
+
+            // Explicitly force position and scale parameters to mathematically resolve in engine before extracting vertices for Cannon JS Trimesh!
+            tunnelAsteroid.updateMatrixWorld(true);
+
+            tunnelAsteroid.traverse((child) => {
+                if (child.isMesh) {
+                    // Procedurally strip the native generic GLTF material wrapper and mathematically generate a jagged rock texture
+                    child.material = new THREE.MeshStandardMaterial({
+                        color: 0x47423d,        // Deep meteorite grey-brown
+                        roughness: 0.95,        // Utterly unreflective
+                        metalness: 0.1,         // Flat rock consistency
+                        flatShading: true,      // Forces every single geometric polygon to render distinctly (creating jagged crags artificially!)
+                        fog: false
+                    });
+
+                    // Enforce geometry update so flat shading computes strictly against the vertices inherently
+                    if (child.geometry) child.geometry.computeVertexNormals();
+
+                    // Generate complete raw terrain collisions inside the structural crater natively
+                    this.physicsWorld.addStaticTrimesh(child);
+                    this.collidableMeshes.push(child);
+                }
+            });
+
+            this.scene.add(tunnelAsteroid);
+            this.activeTunnelAsteroidMesh = tunnelAsteroid;
+        });
     }
 
     /**
@@ -1569,6 +1794,61 @@ class DioramaScene {
         if (this.effects) this.effects.update(dt);
 
         // 4. Render main loop frame
+        if (this.activeAsteroidOrbit) {
+            // Sweeps massive horizontal orbit
+            // Slowly tumbling internally
+        }
+        // Swarm all background zero-g components cleanly using 3D Lissajous path curves
+        const baseTime = performance.now() * 0.00015; // Slow down orbital speed drastically
+        for (let pair of this.physicsWorld.dynamicBodies) {
+            if (pair.body.isSwarmProp) {
+                const b = pair.body;
+                const t = baseTime + b.swarmPhaseOffset;
+
+                // Extremely erratic, shifting 3D geometry curve 
+                // X radius constantly scales dynamically between -300 and 300 while crossing paths
+                const targetX = Math.sin(t * 0.3) * Math.cos(t * 0.1) * 600;
+                // Z radius swoops elliptically
+                const targetZ = Math.cos(t * 0.4) * Math.sin(t * 0.15) * 600;
+                // Y radius undulates massively from altitude 50 to 350
+                const targetY = 150 + Math.sin(t * 0.2) * 200;
+
+                // Generate a highly flexible spring force towards the random target node
+                const dtF = 5.0; // Slow down the pull tension by 10x!
+                const forceX = (targetX - b.position.x) * dtF;
+                const forceY = (targetY - b.position.y) * dtF;
+                const forceZ = (targetZ - b.position.z) * dtF;
+
+                b.applyForce(new CANNON.Vec3(forceX, forceY, forceZ), b.position);
+
+                // Ensure they don't break velocity limits when drifting tightly
+                if (b.velocity.length() > 20) {
+                    b.velocity.scale(0.95, b.velocity); // Cap orbital max velocity for smooth drift
+                }
+
+                // Force extremely slow, majestic cinematic tumbling universally inside Swarm physics arrays
+                if (b.angularVelocity.length() > 0.02) { // 0.02 radians/sec ~ 1 degree per second max speed for giant boulders
+                    b.angularVelocity.scale(0.85, b.angularVelocity);
+                }
+
+                // If it is the Porsche, explicitly steer its visual chassis directly into the wind vector smoothly
+                if (b === this.activePorscheBody) {
+                    const fw = b.velocity.clone();
+                    // Cancel internal angular spin conflicts
+                    b.angularVelocity.set(0, 0, 0);
+
+                    if (fw.lengthSquared() > 0.1) {
+                        fw.normalize();
+                        // Orient the chassis facing the velocity mathematically
+                        const targetQuat = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, 1), new THREE.Vector3(fw.x, fw.y, fw.z));
+                        const bodyQ = new THREE.Quaternion(b.quaternion.x, b.quaternion.y, b.quaternion.z, b.quaternion.w);
+                        bodyQ.slerp(targetQuat, 0.005); // EXTREMELY slow turning radius! 
+                        b.quaternion.set(bodyQ.x, bodyQ.y, bodyQ.z, bodyQ.w);
+                    }
+                }
+            }
+        }
+
         this.renderer.render(this.scene, this.camera);
 
         // 5. Update Diagnostics

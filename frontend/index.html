@@ -18,6 +18,14 @@
             }
         }
     </script>
+    <script>
+        window.addEventListener("error", function (e) {
+            document.body.innerHTML += "<div style='color:red;font-size:24px;position:absolute;z-index:99999;top:100px;left:100px;background:black;padding:20px;border:2px solid red;'>" + e.message + "<br>" + e.filename + ":" + e.lineno + "</div>";
+        });
+        window.addEventListener("unhandledrejection", function (e) {
+            document.body.innerHTML += "<div style='color:red;font-size:24px;position:absolute;z-index:99999;top:200px;left:100px;background:black;padding:20px;border:2px solid red;'>Promise Rejection: " + e.reason + "</div>";
+        });
+    </script>
 </head>
 
 <body>
