@@ -301,6 +301,202 @@
         </div>
     </div>
 
+    <!-- Live Key Visualizer Widget -->
+    <div id="key-mapping-toast">Key mapping active</div>
+    <div id="key-overlay">
+        <div id="numpad-grid">
+            <div id="np-7" class="np-key">7</div>
+            <div id="np-8" class="np-key">8</div>
+            <div id="np-9" class="np-key">9</div>
+            <div id="np-4" class="np-key">4</div>
+            <div id="np-5" class="np-key">5</div>
+            <div id="np-6" class="np-key">6</div>
+            <div id="np-1" class="np-key">1</div>
+            <div id="np-2" class="np-key">2</div>
+            <div id="np-3" class="np-key">3</div>
+        </div>
+        <div id="dynamic-keys"></div>
+    </div>
+    <style>
+        #key-mapping-toast {
+            position: fixed;
+            right: 20px;
+            top: 5%;
+            color: cyan;
+            background: rgba(0, 255, 255, 0.15);
+            border: 1px solid cyan;
+            padding: 10px 20px;
+            border-radius: 8px;
+            font-family: Orbitron, monospace;
+            font-weight: bold;
+            opacity: 0;
+            transition: opacity 2s ease-in-out;
+            pointer-events: none;
+            z-index: 9999;
+        }
+
+        #key-overlay {
+            position: fixed;
+            right: 20px;
+            top: 15%;
+            display: none;
+            flex-direction: column;
+            align-items: flex-end;
+            gap: 15px;
+            z-index: 9999;
+            pointer-events: none;
+        }
+
+        #numpad-grid {
+            display: none;
+            grid-template-columns: repeat(3, 50px);
+            grid-template-rows: repeat(3, 50px);
+            gap: 8px;
+            background: rgba(0, 0, 0, 0.4);
+            padding: 10px;
+            border-radius: 8px;
+            border: 1px solid rgba(0, 255, 255, 0.2);
+        }
+
+        .np-key {
+            border: 1px solid rgba(0, 255, 255, 0.4);
+            color: rgba(0, 255, 255, 0.4);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-family: 'Orbitron', monospace;
+            font-size: 1.2rem;
+            font-weight: bold;
+            border-radius: 4px;
+            transition: all 0.1s;
+        }
+
+        .np-key.pressed {
+            background: rgba(0, 255, 255, 0.5);
+            border-color: cyan;
+            color: white;
+            box-shadow: 0 0 10px cyan;
+            transform: scale(0.9);
+        }
+
+        #dynamic-keys {
+            display: flex;
+            flex-direction: column-reverse;
+            align-items: flex-end;
+            gap: 12px;
+            max-height: 50vh;
+            overflow: hidden;
+            width: 100%;
+        }
+
+        .visual-key {
+            padding: 10px 25px;
+            background: rgba(0, 255, 255, 0.15);
+            border: 2px solid cyan;
+            color: cyan;
+            font-family: 'Orbitron', monospace;
+            font-size: 1.6rem;
+            font-weight: bold;
+            border-radius: 8px;
+            text-transform: uppercase;
+            text-align: center;
+            box-shadow: 0 0 15px rgba(0, 255, 255, 0.4);
+            animation: keyPressIn 0.1s forwards;
+            transition: all 0.2s ease-out;
+        }
+
+        .visual-key.released {
+            opacity: 0;
+            transform: scale(0.7) translateX(20px);
+        }
+
+        @keyframes keyPressIn {
+            0% {
+                transform: scale(0.5);
+                opacity: 0;
+            }
+
+            100% {
+                transform: scale(1);
+                opacity: 1;
+            }
+        }
+    </style>
+    <script>
+        const keyOverlay = document.getElementById('key-overlay');
+        const dynamicKeysContainer = document.getElementById('dynamic-keys');
+        const toast = document.getElementById('key-mapping-toast');
+        let overlayActive = false;
+        let toastTimeout = null;
+        const activeKeys = new Map();
+
+        window.addEventListener('keydown', (e) => {
+            if (e.code === 'Numpad0') {
+                overlayActive = !overlayActive;
+                keyOverlay.style.display = overlayActive ? 'flex' : 'none';
+
+                toast.textContent = overlayActive ? 'Key mapping active' : 'Key mapping disabled';
+                toast.style.transition = 'none';
+                toast.style.opacity = '1';
+
+                clearTimeout(toastTimeout);
+                toastTimeout = setTimeout(() => {
+                    toast.style.transition = 'opacity 2s ease-in-out';
+                    toast.style.opacity = '0';
+                }, 50);
+                return;
+            }
+
+            if (!overlayActive || !e.key) return;
+
+            const npMatch = e.code.match(/^Numpad([1-9])$/);
+            if (npMatch) {
+                const num = npMatch[1];
+                const gridSlot = document.getElementById(`np-${num}`);
+                if (gridSlot && !gridSlot.classList.contains('pressed')) {
+                    gridSlot.classList.add('pressed');
+                    document.getElementById('numpad-grid').style.display = 'grid';
+                }
+                return;
+            }
+
+            if (!activeKeys.has(e.code)) {
+                const kDiv = document.createElement('div');
+                kDiv.className = 'visual-key';
+                kDiv.textContent = e.key.length === 1 ? e.key : e.code.replace('Key', '').replace('Digit', '');
+                dynamicKeysContainer.appendChild(kDiv);
+                activeKeys.set(e.code, kDiv);
+            }
+        });
+
+        window.addEventListener('keyup', (e) => {
+            if (!overlayActive) return;
+
+            const npMatch = e.code.match(/^Numpad([1-9])$/);
+            if (npMatch) {
+                const num = npMatch[1];
+                const gridSlot = document.getElementById(`np-${num}`);
+                if (gridSlot) {
+                    gridSlot.classList.remove('pressed');
+                    const anyPressed = Array.from(document.querySelectorAll('.np-key')).some(k => k.classList.contains('pressed'));
+                    if (!anyPressed) {
+                        document.getElementById('numpad-grid').style.display = 'none';
+                    }
+                }
+                return;
+            }
+
+            if (activeKeys.has(e.code)) {
+                const kDiv = activeKeys.get(e.code);
+                kDiv.classList.add('released');
+                setTimeout(() => {
+                    if (kDiv.parentNode) kDiv.parentNode.removeChild(kDiv);
+                    activeKeys.delete(e.code);
+                }, 200);
+            }
+        });
+    </script>
+
     <!-- Main Scene script -->
     <script type="module" src="js/scene.js"></script>
 </body>
