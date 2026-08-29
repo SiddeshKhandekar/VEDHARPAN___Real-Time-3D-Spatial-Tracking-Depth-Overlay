@@ -951,6 +951,61 @@ class DioramaScene {
             (error) => console.error('Error loading Tires Model:', error)
         );
 
+        // 4.5. Load 911 Singer Twin Turbo randomly tumbling in zero-g
+        loader.load(
+            'assets/porsche_911_singer_twin_turbo.glb',
+            (gltf) => {
+                const porscheClone = gltf.scene;
+
+                // 1. Spawning right in front of the Mecha (Mecha is at 0, 5, 2 looking down Z)
+                // We'll spawn it hovering perfectly in mid-air in front of the stairs!
+                porscheClone.position.set(0, 15, -20);
+                porscheClone.rotation.set(0, 0, 0); // Straight up
+
+                // 2. Measure bounding and scale accurately compared to Mecha
+                const pBox = new THREE.Box3().setFromObject(porscheClone);
+                const pWidth = pBox.max.x - pBox.min.x;
+                
+                // Target width: 1.5 units (comparable to Mecha size)
+                const pScale = 1.5 / pWidth;
+                porscheClone.scale.set(pScale, pScale, pScale);
+                
+                // 3. Add Bright Green Identifier Border (BoxHelper)
+                const greenBorder = new THREE.BoxHelper(porscheClone, 0x00ff00);
+                // We must add the helper to the scene, and map it directly
+                this.scene.add(greenBorder);
+
+                configureShadows(porscheClone, true, true);
+                this.scene.add(porscheClone);
+                
+                // Keep the helper synchronized in the rendering loop
+                this.porscheHelper = greenBorder;
+                this.activePorscheObj = porscheClone;
+
+
+                // Add to physics engine dynamically so bullets strike it
+                const body = this.physicsWorld.addDynamicBody(porscheClone, 1500, 'box', 3.0);
+                body.ignoreGravity = true;
+                body.linearDamping = 0.0;
+                body.angularDamping = 0.0;
+
+                body.velocity.set(
+                    (Math.random() - 0.5) * 2.0,
+                    (Math.random() - 0.5) * 2.0,
+                    (Math.random() - 0.5) * 2.0
+                );
+                body.angularVelocity.set(
+                    (Math.random() - 0.5),
+                    (Math.random() - 0.5),
+                    (Math.random() - 0.5)
+                );
+
+                console.log('Loaded: Zero-G Porsche Singer');
+            },
+            undefined,
+            (error) => console.error('Error loading Porsche Model:', error)
+        );
+
         // 5. Load City Map
         loader.load(
             `${assetPath}scene.gltf`,
@@ -1642,6 +1697,9 @@ class DioramaScene {
         if (this.activeAsteroidOrbit) {
             // Sweeps massive horizontal orbit
             // Slowly tumbling internally
+        }
+        if (this.porscheHelper && this.activePorscheObj) {
+            this.porscheHelper.update();
         }
         this.renderer.render(this.scene, this.camera);
 
