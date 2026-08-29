@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import * as CANNON from 'cannon-es';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { PhysicsWorld } from './physics_world.js';
 import { InputManager } from './input_manager.js';
@@ -929,15 +930,11 @@ class DioramaScene {
                     body.linearDamping = 0.0;
                     body.angularDamping = 0.0;
 
-                    // Assign a randomized kinetic drift vector
-                    const drift = 4.0;
-                    body.velocity.set(
-                        (Math.random() - 0.5) * drift,
-                        (Math.random() - 0.5) * drift,
-                        (Math.random() - 0.5) * drift
-                    );
-
-                    // Assign a slow perpetual tumble
+                    // Flag them for Lissajous swarm routing and map an arbitrary offset phase for visual randomness
+                    body.isSwarmProp = true;
+                    body.swarmPhaseOffset = Math.random() * 1000.0;
+                    
+                    // Assign a slow perpetual tumble to tires
                     body.angularVelocity.set(
                         (Math.random() - 0.5) * 2,
                         (Math.random() - 0.5) * 2,
@@ -965,29 +962,36 @@ class DioramaScene {
                 // 2. Measure bounding and scale accurately compared to Mecha
                 const pBox = new THREE.Box3().setFromObject(porscheClone);
                 const pWidth = pBox.max.x - pBox.min.x;
-                
+
                 // Target width: 1.5 units (comparable to Mecha size)
                 const pScale = 1.5 / pWidth;
                 porscheClone.scale.set(pScale, pScale, pScale);
-                
-                // 3. Add Bright Green Identifier Border (BoxHelper)
-                const greenBorder = new THREE.BoxHelper(porscheClone, 0x00ff00);
-                // We must add the helper to the scene, and map it directly
-                this.scene.add(greenBorder);
+
+                // 3. Add Bright White Edge Detail Identifier
+                porscheClone.traverse((child) => {
+                    if (child.isMesh) {
+                        const edges = new THREE.EdgesGeometry(child.geometry, 15);
+                        const line = new THREE.LineSegments(edges, new THREE.LineBasicMaterial({ color: 0xffffff, linewidth: 2.0 }));
+                        child.add(line);
+                    }
+                });
 
                 configureShadows(porscheClone, true, true);
                 this.scene.add(porscheClone);
-                
-                // Keep the helper synchronized in the rendering loop
-                this.porscheHelper = greenBorder;
+
+                // Map reference for manual centripetal orbital pull!
                 this.activePorscheObj = porscheClone;
 
 
                 // Add to physics engine dynamically so bullets strike it
-                const body = this.physicsWorld.addDynamicBody(porscheClone, 1500, 'box', 3.0);
+                const body = this.physicsWorld.addDynamicBody(porscheClone, 1500, 'sphere', 1.5);
                 body.ignoreGravity = true;
                 body.linearDamping = 0.0;
                 body.angularDamping = 0.0;
+
+                this.activePorscheBody = body;
+                body.isSwarmProp = true;
+                body.swarmPhaseOffset = 0.0; // Porsche follows the main path exactly
 
                 body.velocity.set(
                     (Math.random() - 0.5) * 2.0,
@@ -1698,9 +1702,52 @@ class DioramaScene {
             // Sweeps massive horizontal orbit
             // Slowly tumbling internally
         }
-        if (this.porscheHelper && this.activePorscheObj) {
-            this.porscheHelper.update();
+        // Swarm all background zero-g components cleanly using 3D Lissajous path curves
+        const baseTime = performance.now() * 0.00015; // Slow down orbital speed drastically
+        for (let pair of this.physicsWorld.dynamicBodies) {
+            if (pair.body.isSwarmProp) {
+                const b = pair.body;
+                const t = baseTime + b.swarmPhaseOffset; 
+                
+                // Extremely erratic, shifting 3D geometry curve 
+                // X radius constantly scales dynamically between -300 and 300 while crossing paths
+                const targetX = Math.sin(t * 0.3) * Math.cos(t * 0.1) * 600;
+                // Z radius swoops elliptically
+                const targetZ = Math.cos(t * 0.4) * Math.sin(t * 0.15) * 600;
+                // Y radius undulates massively from altitude 50 to 350
+                const targetY = 150 + Math.sin(t * 0.2) * 200;
+                
+                // Generate a highly flexible spring force towards the random target node
+                const dtF = 5.0; // Slow down the pull tension by 10x!
+                const forceX = (targetX - b.position.x) * dtF;
+                const forceY = (targetY - b.position.y) * dtF;
+                const forceZ = (targetZ - b.position.z) * dtF;
+                
+                b.applyForce(new CANNON.Vec3(forceX, forceY, forceZ), b.position);
+
+                // Ensure they don't break velocity limits when drifting tightly
+                if (b.velocity.length() > 20) {
+                    b.velocity.scale(0.95, b.velocity); // Cap orbital max velocity for smooth drift
+                }
+
+                // If it is the Porsche, explicitly steer its visual chassis directly into the wind vector smoothly
+                if (b === this.activePorscheBody) {
+                    const fw = b.velocity.clone();
+                    // Cancel internal angular spin conflicts
+                    b.angularVelocity.set(0, 0, 0); 
+                    
+                    if (fw.lengthSquared() > 0.1) {
+                        fw.normalize();
+                        // Orient the chassis facing the velocity mathematically
+                        const targetQuat = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0,0,1), new THREE.Vector3(fw.x, fw.y, fw.z));
+                        const bodyQ = new THREE.Quaternion(b.quaternion.x, b.quaternion.y, b.quaternion.z, b.quaternion.w);
+                        bodyQ.slerp(targetQuat, 0.005); // EXTREMELY slow turning radius! 
+                        b.quaternion.set(bodyQ.x, bodyQ.y, bodyQ.z, bodyQ.w);
+                    }
+                }
+            }
         }
+        
         this.renderer.render(this.scene, this.camera);
 
         // 5. Update Diagnostics

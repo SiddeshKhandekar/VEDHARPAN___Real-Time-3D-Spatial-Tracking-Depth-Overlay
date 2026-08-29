@@ -18,6 +18,15 @@ export class PhysicsWorld {
 
         // Keep track of all bodies paired with meshes
         this.dynamicBodies = [];
+
+        // Correctly hook anti-gravity into the explicit Cannon.js preStep dispatcher!
+        this.world.addEventListener('preStep', () => {
+            for (let pair of this.dynamicBodies) {
+                if (pair.body.ignoreGravity) {
+                    pair.body.force.y -= pair.body.mass * this.world.gravity.y;
+                }
+            }
+        });
     }
 
     /**
@@ -121,6 +130,9 @@ export class PhysicsWorld {
         // Linear damping prevents endless sliding
         body.linearDamping = 0.3;
         body.angularDamping = 0.3;
+
+
+
         this.world.addBody(body);
 
         this.dynamicBodies.push({ mesh, body });
@@ -130,13 +142,6 @@ export class PhysicsWorld {
 
 
     step(dt) {
-        // Enforce anti-gravity for straight-flying projectiles
-        for (let pair of this.dynamicBodies) {
-            if (pair.body.ignoreGravity) {
-                // Apply upward force exactly equal and opposite to gravity
-                pair.body.force.y -= pair.body.mass * this.world.gravity.y;
-            }
-        }
 
         // Step physics
         this.world.step(1 / 60, dt, 3);
