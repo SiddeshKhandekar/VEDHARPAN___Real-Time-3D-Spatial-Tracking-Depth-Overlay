@@ -79,7 +79,7 @@ export class MechaController {
 
         this.glassMat = new THREE.MeshPhysicalMaterial({
             color: 0x00f2fe, emissive: 0x00f2fe, emissiveIntensity: 0.15,
-            transparent: true, opacity: 0.25, transmission: 0.7, roughness: 0.1, depthWrite: false, side: THREE.DoubleSide, fog: false
+            transparent: true, opacity: 0.15, roughness: 0.1, depthWrite: false, side: THREE.DoubleSide, fog: false
         });
         this.wireMat = new THREE.MeshBasicMaterial({
             color: 0x4facfe, wireframe: true, transparent: true, opacity: 0.25, depthWrite: false, blending: THREE.NormalBlending, side: THREE.DoubleSide, fog: false
@@ -344,11 +344,12 @@ export class MechaController {
             // Re-bind to grid
             if (this.shieldPhysics.collisionFilterGroup === 0) {
                 this.shieldPhysics.collisionFilterGroup = 4;
+                this.shieldPhysics.collisionFilterMask = 2 | 1;
             }
         } else {
-            // Toss physical component far so it doesn't block shots when transparent
-            this.shieldPhysics.position.set(0, -9999, 0);
+            // Disable tracking dynamically but DO NOT teleport position (Destroys SAP Broadphase Arrays natively causing severe physics lag)
             this.shieldPhysics.collisionFilterGroup = 0;
+            this.shieldPhysics.collisionFilterMask = 0;
         }
 
         // Bind DOM UI progress tracking

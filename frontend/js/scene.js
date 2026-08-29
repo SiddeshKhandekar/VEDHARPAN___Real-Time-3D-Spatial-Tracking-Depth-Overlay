@@ -124,7 +124,7 @@ class DioramaScene {
 
         // 3. Setup Camera — straight eye-level looking into the hall
         const aspect = window.innerWidth / window.innerHeight;
-        this.camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 5000);
+        this.camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 50000);
         this.camera.position.set(0, 1.5, 6);
         this.camera.lookAt(0, 1.5, 0);
 
