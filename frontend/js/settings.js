@@ -49,6 +49,7 @@ export const ACTIONS = {
 const DEFAULT_GRAPHICS = {
     fullscreen: false,
     invertMouse: true,
+    sensitivity: 1.0
 };
 
 // ── localStorage key ──────────────────────────────────────────────────────────

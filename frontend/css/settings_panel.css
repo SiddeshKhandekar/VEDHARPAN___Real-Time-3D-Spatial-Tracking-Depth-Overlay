@@ -228,23 +228,23 @@
 }
 
 .toggle-switch input:checked+.slider {
-    background: rgba(79, 172, 254, 0.4);
-    border-color: #4facfe;
-    box-shadow: 0 0 14px rgba(79, 172, 254, 0.45);
+    background: rgba(0, 242, 254, 0.4);
+    border-color: #00f2fe;
+    box-shadow: 0 0 14px rgba(0, 242, 254, 0.45);
 }
 
 .toggle-switch input:checked+.slider::before {
     transform: translateX(26px);
-    background: #4facfe;
+    background: #00f2fe;
 }
 
 /* Active toggle labels brighten */
 .toggle-row:has(input:not(:checked))>span:first-child {
-    color: #4facfe;
+    color: #00f2fe;
 }
 
 .toggle-row:has(input:checked)>span:last-child {
-    color: #4facfe;
+    color: #00f2fe;
 }
 
 /* ── Control Sub-Tabs (Keyboard / Mouse) ────────────────────── */
@@ -489,4 +489,19 @@
 
 .settings-btn-primary:active {
     transform: translateY(0);
+}
+
+/* ── Mouse Sensitivity Slider Styling ────────── */
+#mouse-sensitivity-slider {
+    width: 100%;
+    cursor: pointer;
+    accent-color: #00f2fe;
+    height: 6px;
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 4px;
+    outline: none;
+}
+
+#mouse-sensitivity-slider:hover {
+    accent-color: #ffffff;
 }

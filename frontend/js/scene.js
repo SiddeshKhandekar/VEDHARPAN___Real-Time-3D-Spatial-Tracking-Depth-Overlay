@@ -303,7 +303,7 @@ class DioramaScene {
         });
 
         this.renderer.domElement.addEventListener('mousemove', (e) => {
-            const sensitivity = 0.003;
+            const sensitivity = 0.003 * (this.settingsManager.graphics.sensitivity || 1.0);
             // Invert Y-axis multiplier from settings
             const pitchDir = this.settingsManager.graphics.invertMouse ? 1 : -1;
             if (this.gameState === 'playing') {
@@ -501,7 +501,17 @@ class DioramaScene {
         if (invertToggle) {
             invertToggle.addEventListener('change', () => {
                 sm.graphics.invertMouse = invertToggle.checked;
-                // Immediate effect — no save needed until Save & Close
+            });
+        }
+
+        // ── Mouse Sensitivity Slider ───────────────────────────
+        const sensSlider = document.getElementById('mouse-sensitivity-slider');
+        const sensValue = document.getElementById('mouse-sensitivity-value');
+        if (sensSlider) {
+            sensSlider.addEventListener('input', () => {
+                const val = parseFloat(sensSlider.value);
+                sensValue.textContent = `x${val.toFixed(1)}`;
+                sm.graphics.sensitivity = val;
             });
         }
 
@@ -511,6 +521,7 @@ class DioramaScene {
             saveBtn.addEventListener('click', () => {
                 sm.graphics.fullscreen = document.getElementById('fullscreen-toggle').checked;
                 sm.graphics.invertMouse = document.getElementById('invert-mouse-toggle')?.checked ?? false;
+                if (sensSlider) sm.graphics.sensitivity = parseFloat(sensSlider.value);
                 sm.save();
                 sm.applyGraphics();
                 if (this.inputManager) sm.applyToInputManager(this.inputManager);
@@ -536,6 +547,11 @@ class DioramaScene {
         document.getElementById('fullscreen-toggle').checked = sm.graphics.fullscreen;
         const invEl = document.getElementById('invert-mouse-toggle');
         if (invEl) invEl.checked = sm.graphics.invertMouse ?? false;
+
+        if (sensSlider) {
+            sensSlider.value = sm.graphics.sensitivity ?? 1.0;
+            sensValue.textContent = `x${parseFloat(sensSlider.value).toFixed(1)}`;
+        }
 
         // Apply saved settings on startup
         if (this.inputManager) sm.applyToInputManager(this.inputManager);
@@ -1539,10 +1555,8 @@ class DioramaScene {
             }
         }
 
-        // Smoothly interpolate camera position (Lerp) for stability
-        this.camera.position.x += (targetCamX - this.camera.position.x) * 0.15;
-        this.camera.position.y += (targetCamY - this.camera.position.y) * 0.15;
-        this.camera.position.z += (targetCamZ - this.camera.position.z) * 0.15;
+        // Force direct geometry mappings with precisely ZERO camera interpolation lag physically clamping the position vector natively!
+        this.camera.position.set(targetCamX, targetCamY, targetCamZ);
 
         // Perform Asymmetric Frustum Warping (Off-Axis Projection)
         const xOffset = -this.latestHead.x * FRUSTUM_WARP_SENSITIVITY_X;

@@ -213,79 +213,90 @@
 
             <!-- MOUSE SUB-TAB -->
             <div class="ctrl-content hidden" id="ctrl-mouse">
-                <div class="settings-section">
-                    <div class="settings-section-header">Mouse Options</div>
-                    <div class="setting-row">
-                        <div class="setting-info">
-                            <div class="setting-label">Invert Y Axis</div>
-                            <div class="setting-desc">Reverses the vertical camera movement when looking around.</div>
-                        </div>
-                        <div class="toggle-row">
-                            <span class="toggle-label" id="lbl-normal">Normal</span>
-                            <label class="toggle-switch">
-                                <input type="checkbox" id="invert-mouse-toggle">
-                                <span class="slider"></span>
-                            </label>
-                            <span class="toggle-label" id="lbl-inverted">Inverted</span>
-                        </div>
+                <div class="setting-row">
+                    <div class="setting-info">
+                        <div class="setting-label">Invert Y Axis</div>
+                        <div class="setting-desc">Reverses the vertical camera movement when looking around.</div>
+                    </div>
+                    <div class="toggle-row">
+                        <span class="toggle-label" id="lbl-normal">Normal</span>
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="invert-mouse-toggle">
+                            <span class="slider"></span>
+                        </label>
+                        <span class="toggle-label" id="lbl-inverted">Inverted</span>
                     </div>
                 </div>
 
-                <div class="settings-section">
-                    <div class="settings-section-header">Mouse Bindings</div>
-                    <table class="keybind-table">
-                        <thead>
-                            <tr>
-                                <th class="col-action">Action</th>
-                                <th class="col-default">Assigned Button</th>
-                                <th class="col-custom">Notes</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <tr>
-                                <td class="col-action">Fire Weapon</td>
-                                <td><span class="key-badge">Left Click</span></td>
-                                <td class="mouse-note">Click or hold (Rapid mode)</td>
-                            </tr>
-                            <tr>
-                                <td class="col-action">Aim / Zoom</td>
-                                <td><span class="key-badge">Right Click</span></td>
-                                <td class="mouse-note">Hold to enter Aiming View</td>
-                            </tr>
-                            <tr>
-                                <td class="col-action">Camera Look</td>
-                                <td><span class="key-badge">Mouse Move</span></td>
-                                <td class="mouse-note">Active in 3rd / 1st Person modes</td>
-                            </tr>
-                            <tr>
-                                <td class="col-action">Cycle Fire Mode</td>
-                                <td><span class="key-badge">Scroll Wheel</span></td>
-                                <td class="mouse-note">Cycles Plasma &#x2192; Rapid &#x2192; Missile &#x2192; Grenade
-                                </td>
-                            </tr>
-                            <tr>
-                                <td class="col-action">Free Roam Orbit</td>
-                                <td><span class="key-badge">Left Drag</span></td>
-                                <td class="mouse-note">Click-drag in Free Roam camera mode</td>
-                            </tr>
-                        </tbody>
-                    </table>
-                </div>
-                <div class="settings-hint">
-                    &#x1F5B1; Mouse bindings are fixed by the browser pointer-lock API and cannot be rebound.
+                <div class="setting-row" style="margin-top: 15px;">
+                    <div class="setting-info">
+                        <div class="setting-label">Mouse Sensitivity</div>
+                        <div class="setting-desc">Controls geometric rotation speed array tracking.</div>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 15px;">
+                        <input type="range" id="mouse-sensitivity-slider" min="0.1" max="5.0" step="0.1" value="1.0"
+                            style="width: 150px; cursor: pointer;">
+                        <span id="mouse-sensitivity-value"
+                            style="font-family: 'Orbitron', monospace; color: cyan; font-weight: bold; width: 40px; text-align: right;">x1.0</span>
+                    </div>
                 </div>
             </div>
-        </div>
 
-        <!-- Footer -->
-        <div class="settings-footer">
-            <button id="settings-restore-btn" class="settings-btn settings-btn-secondary">
-                &#x21BA; Restore Defaults
-            </button>
-            <button id="settings-save-btn" class="settings-btn settings-btn-primary">
-                &#x2714; Save &amp; Close
-            </button>
+            <div class="settings-section">
+                <div class="settings-section-header">Mouse Bindings</div>
+                <table class="keybind-table">
+                    <thead>
+                        <tr>
+                            <th class="col-action">Action</th>
+                            <th class="col-default">Assigned Button</th>
+                            <th class="col-custom">Notes</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td class="col-action">Fire Weapon</td>
+                            <td><span class="key-badge">Left Click</span></td>
+                            <td class="mouse-note">Click or hold (Rapid mode)</td>
+                        </tr>
+                        <tr>
+                            <td class="col-action">Aim / Zoom</td>
+                            <td><span class="key-badge">Right Click</span></td>
+                            <td class="mouse-note">Hold to enter Aiming View</td>
+                        </tr>
+                        <tr>
+                            <td class="col-action">Camera Look</td>
+                            <td><span class="key-badge">Mouse Move</span></td>
+                            <td class="mouse-note">Active in 3rd / 1st Person modes</td>
+                        </tr>
+                        <tr>
+                            <td class="col-action">Cycle Fire Mode</td>
+                            <td><span class="key-badge">Scroll Wheel</span></td>
+                            <td class="mouse-note">Cycles Plasma &#x2192; Rapid &#x2192; Missile &#x2192; Grenade
+                            </td>
+                        </tr>
+                        <tr>
+                            <td class="col-action">Free Roam Orbit</td>
+                            <td><span class="key-badge">Left Drag</span></td>
+                            <td class="mouse-note">Click-drag in Free Roam camera mode</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+            <div class="settings-hint">
+                &#x1F5B1; Mouse bindings are fixed by the browser pointer-lock API and cannot be rebound.
+            </div>
         </div>
+    </div>
+
+    <!-- Footer -->
+    <div class="settings-footer">
+        <button id="settings-restore-btn" class="settings-btn settings-btn-secondary">
+            &#x21BA; Restore Defaults
+        </button>
+        <button id="settings-save-btn" class="settings-btn settings-btn-primary">
+            &#x2714; Save &amp; Close
+        </button>
+    </div>
 
     </div>
 
