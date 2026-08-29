@@ -1047,11 +1047,11 @@ class DioramaScene {
                     body.isSwarmProp = true;
                     body.swarmPhaseOffset = Math.random() * 1000.0;
 
-                    // Assign a slow perpetual tumble to tires
+                    // Assign an extremely slow hover-drift — no aggressive spinning
                     body.angularVelocity.set(
-                        (Math.random() - 0.5) * 2,
-                        (Math.random() - 0.5) * 2,
-                        (Math.random() - 0.5) * 2
+                        (Math.random() - 0.5) * 0.015,
+                        (Math.random() - 0.5) * 0.015,
+                        (Math.random() - 0.5) * 0.015
                     );
                 }
 
@@ -1113,9 +1113,9 @@ class DioramaScene {
                     (Math.random() - 0.5) * 2.0
                 );
                 body.angularVelocity.set(
-                    (Math.random() - 0.5),
-                    (Math.random() - 0.5),
-                    (Math.random() - 0.5)
+                    (Math.random() - 0.5) * 0.008,
+                    (Math.random() - 0.5) * 0.008,
+                    (Math.random() - 0.5) * 0.008
                 );
 
                 console.log('Loaded: Zero-G Porsche Singer');
@@ -1207,6 +1207,93 @@ class DioramaScene {
             spawnSwarmAsteroid('asteroid.glb', 25.0, 2500.0);
         }
 
+        // Universal Swarm Loader for vehicle/prop assets — Porsche-style zero-g drift
+        // No edge detail lines; shadows disabled; single sphere physics only for 60+ FPS.
+        const spawnSwarmProp = (fileName, targetWidth, mass) => {
+            loader.load(
+                `assets/${fileName}`,
+                (gltf) => {
+                    const propClone = gltf.scene;
+
+                    // Normalize scale using bounding box fit to targetWidth
+                    propClone.updateMatrixWorld(true);
+                    const pBox = new THREE.Box3().setFromObject(propClone);
+                    const naturalWidth = pBox.max.x - pBox.min.x;
+                    const pScale = targetWidth / naturalWidth;
+                    propClone.scale.set(pScale, pScale, pScale);
+
+                    // Random initial spawn position scattered across the void
+                    propClone.position.set(
+                        (Math.random() - 0.5) * 300,
+                        -30 + Math.random() * 150,
+                        (Math.random() - 0.5) * 300
+                    );
+
+                    // Random initial tumble
+                    propClone.rotation.set(
+                        Math.random() * Math.PI * 2,
+                        Math.random() * Math.PI * 2,
+                        Math.random() * Math.PI * 2
+                    );
+
+                    // Suppress shadows and fog; push meshes into collidableMeshes for Physics Cloak support
+                    propClone.traverse((child) => {
+                        if (child.isMesh) {
+                            this.collidableMeshes.push(child);
+                            child.castShadow = false;
+                            child.receiveShadow = false;
+                            if (child.material) child.material.fog = false;
+                        }
+                    });
+
+                    this.scene.add(propClone);
+
+                    // Bind to Cannon.js with sphere approximation — no trimesh (too expensive)
+                    const radiusScale = targetWidth * 0.5;
+                    const body = this.physicsWorld.addDynamicBody(propClone, mass, 'sphere', radiusScale);
+
+                    body.ignoreGravity = true;
+                    body.linearDamping = 0.0;
+                    body.angularDamping = 0.0;
+
+                    // Register into Lissajous swarm path
+                    body.isSwarmProp = true;
+                    body.swarmPhaseOffset = Math.random() * 2000.0;
+
+                    // Extremely slow cinematic hover drift — space debris style
+                    body.angularVelocity.set(
+                        (Math.random() - 0.5) * 0.012,
+                        (Math.random() - 0.5) * 0.012,
+                        (Math.random() - 0.5) * 0.012
+                    );
+
+                    // Kinetic impact explosion trigger
+                    body.addEventListener('collide', (e) => {
+                        if (e.contact) {
+                            const velocityImpact = Math.abs(e.contact.getImpactVelocityAlongNormal());
+                            if (velocityImpact > 1.5) {
+                                const rp = body.position;
+                                const cp = e.contact.rj;
+                                const hitPos = new THREE.Vector3(rp.x + cp.x, rp.y + cp.y, rp.z + cp.z);
+                                if (this.effects) this.effects.createExplosion(hitPos, 2);
+                            }
+                        }
+                    });
+
+                    console.log(`Loaded: Zero-G Swarm Prop → ${fileName}`);
+                },
+                undefined,
+                (err) => console.error(`Error loading swarm prop ${fileName}:`, err)
+            );
+        };
+
+        // Spawn one instance of each vehicle — sized relative to Porsche (1.5 units wide)
+        spawnSwarmProp('t-62a_main_battle_tank.glb', 2.5, 3000.0);
+        spawnSwarmProp('swat_police_van.glb', 2.0, 1800.0);
+        spawnSwarmProp('police_car_suv.glb', 1.8, 1400.0);
+        spawnSwarmProp('nexus-1_space_shuttle.glb', 3.5, 2000.0);
+        spawnSwarmProp('mq-1_predator_uav.glb', 2.0, 800.0);
+        spawnSwarmProp('bombardier_s_train_carriage_-_london_underground.glb', 2.5, 2200.0);
 
 
         // 5. Load City Map
@@ -1756,6 +1843,13 @@ class DioramaScene {
                 }
             });
         }
+
+        // PERFORMANCE: Drop to pixel ratio 1 in cloak mode (wireframe fill-rate is 2x cheaper at native resolution)
+        if (this.isPhysicsCloakActive) {
+            this.renderer.setPixelRatio(1);
+        } else {
+            this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        }
     }
 
     /**
@@ -2004,17 +2098,17 @@ class DioramaScene {
                 // Y radius undulates massively from altitude 50 to 350
                 const targetY = 150 + Math.sin(t * 0.2) * 200;
 
-                // Generate a highly flexible spring force towards the random target node
-                const dtF = 5.0; // Slow down the pull tension by 10x!
+                // Generate a gentle spring force — low tension for slow cinematic drift
+                const dtF = 0.7; // Was 5.0 — dramatically slower orbital pull
                 const forceX = (targetX - b.position.x) * dtF;
                 const forceY = (targetY - b.position.y) * dtF;
                 const forceZ = (targetZ - b.position.z) * dtF;
 
                 b.applyForce(new CANNON.Vec3(forceX, forceY, forceZ), b.position);
 
-                // Ensure they don't break velocity limits when drifting tightly
-                if (b.velocity.length() > 20) {
-                    b.velocity.scale(0.95, b.velocity); // Cap orbital max velocity for smooth drift
+                // Cap max drift speed — space debris moves slowly and gracefully
+                if (b.velocity.length() > 4) {
+                    b.velocity.scale(0.92, b.velocity);
                 }
 
                 // Force extremely slow, majestic cinematic tumbling universally inside Swarm physics arrays
