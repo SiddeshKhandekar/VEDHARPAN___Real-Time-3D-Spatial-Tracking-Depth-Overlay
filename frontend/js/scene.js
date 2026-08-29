@@ -933,7 +933,7 @@ class DioramaScene {
                     // Flag them for Lissajous swarm routing and map an arbitrary offset phase for visual randomness
                     body.isSwarmProp = true;
                     body.swarmPhaseOffset = Math.random() * 1000.0;
-                    
+
                     // Assign a slow perpetual tumble to tires
                     body.angularVelocity.set(
                         (Math.random() - 0.5) * 2,
@@ -1155,7 +1155,11 @@ class DioramaScene {
 
             // Strip fog for total visibility from the ground
             asteroid.traverse((child) => {
-                if (child.isMesh && child.material) child.material.fog = false;
+                if (child.isMesh) {
+                    if (child.material) child.material.fog = false;
+                    this.physicsWorld.addStaticTrimesh(child);
+                    this.collidableMeshes.push(child);
+                }
             });
 
             orbitPivot.add(asteroid);
@@ -1192,6 +1196,10 @@ class DioramaScene {
 
                     // Enforce geometry update so flat shading computes strictly against the vertices inherently
                     if (child.geometry) child.geometry.computeVertexNormals();
+
+                    // Generate complete raw terrain collisions inside the structural crater natively
+                    this.physicsWorld.addStaticTrimesh(child);
+                    this.collidableMeshes.push(child);
                 }
             });
 
@@ -1707,8 +1715,8 @@ class DioramaScene {
         for (let pair of this.physicsWorld.dynamicBodies) {
             if (pair.body.isSwarmProp) {
                 const b = pair.body;
-                const t = baseTime + b.swarmPhaseOffset; 
-                
+                const t = baseTime + b.swarmPhaseOffset;
+
                 // Extremely erratic, shifting 3D geometry curve 
                 // X radius constantly scales dynamically between -300 and 300 while crossing paths
                 const targetX = Math.sin(t * 0.3) * Math.cos(t * 0.1) * 600;
@@ -1716,13 +1724,13 @@ class DioramaScene {
                 const targetZ = Math.cos(t * 0.4) * Math.sin(t * 0.15) * 600;
                 // Y radius undulates massively from altitude 50 to 350
                 const targetY = 150 + Math.sin(t * 0.2) * 200;
-                
+
                 // Generate a highly flexible spring force towards the random target node
                 const dtF = 5.0; // Slow down the pull tension by 10x!
                 const forceX = (targetX - b.position.x) * dtF;
                 const forceY = (targetY - b.position.y) * dtF;
                 const forceZ = (targetZ - b.position.z) * dtF;
-                
+
                 b.applyForce(new CANNON.Vec3(forceX, forceY, forceZ), b.position);
 
                 // Ensure they don't break velocity limits when drifting tightly
@@ -1734,12 +1742,12 @@ class DioramaScene {
                 if (b === this.activePorscheBody) {
                     const fw = b.velocity.clone();
                     // Cancel internal angular spin conflicts
-                    b.angularVelocity.set(0, 0, 0); 
-                    
+                    b.angularVelocity.set(0, 0, 0);
+
                     if (fw.lengthSquared() > 0.1) {
                         fw.normalize();
                         // Orient the chassis facing the velocity mathematically
-                        const targetQuat = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0,0,1), new THREE.Vector3(fw.x, fw.y, fw.z));
+                        const targetQuat = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, 1), new THREE.Vector3(fw.x, fw.y, fw.z));
                         const bodyQ = new THREE.Quaternion(b.quaternion.x, b.quaternion.y, b.quaternion.z, b.quaternion.w);
                         bodyQ.slerp(targetQuat, 0.005); // EXTREMELY slow turning radius! 
                         b.quaternion.set(bodyQ.x, bodyQ.y, bodyQ.z, bodyQ.w);
@@ -1747,7 +1755,7 @@ class DioramaScene {
                 }
             }
         }
-        
+
         this.renderer.render(this.scene, this.camera);
 
         // 5. Update Diagnostics
