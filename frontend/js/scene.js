@@ -116,9 +116,9 @@ class DioramaScene {
             powerPreference: "high-performance"
         });
         this.renderer.setSize(window.innerWidth, window.innerHeight);
-        this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        this.renderer.setPixelRatio(1); // PERF: Cap at 1x — halves shaded fragments on HiDPI
         this.renderer.shadowMap.enabled = true;
-        this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        this.renderer.shadowMap.type = THREE.PCFShadowMap; // PERF: PCF is ~30% faster than PCFSoft
         this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
         this.renderer.toneMappingExposure = 1.2;
 
@@ -696,8 +696,8 @@ class DioramaScene {
         this.dirLight.castShadow = true;
 
         // Shadow frustum sized to cover the whole room interior
-        this.dirLight.shadow.mapSize.width = 4096;
-        this.dirLight.shadow.mapSize.height = 4096;
+        this.dirLight.shadow.mapSize.width = 2048;  // PERF: 2048 is visually identical at this camera distance
+        this.dirLight.shadow.mapSize.height = 2048;
         this.dirLight.shadow.camera.near = 0.5;
         this.dirLight.shadow.camera.far = 30;
         this.dirLight.shadow.camera.left = -10;
@@ -1025,12 +1025,13 @@ class DioramaScene {
                     tireClone.rotation.z = Math.random() * Math.PI * 2;
 
                     tireClone.scale.set(0.4, 0.4, 0.4);
-                    configureShadows(tireClone, true, true);
+                    configureShadows(tireClone, false, false); // PERF: void objects — no visible shadows
                     this.scene.add(tireClone);
 
                     tireClone.traverse((child) => {
                         if (child.isMesh) {
                             this.collidableMeshes.push(child);
+                            if (child.material) child.material.fog = false; // PERF: deep void — fog is wasted
                         }
                     });
 
@@ -1080,17 +1081,15 @@ class DioramaScene {
                 const pScale = 1.5 / pWidth;
                 porscheClone.scale.set(pScale, pScale, pScale);
 
-                // 3. Add Bright White Edge Detail Identifier
+                // 3. Register meshes for physics cloak (EdgesGeometry removed — too expensive per-mesh)
                 porscheClone.traverse((child) => {
                     if (child.isMesh) {
                         this.collidableMeshes.push(child);
-                        const edges = new THREE.EdgesGeometry(child.geometry, 15);
-                        const line = new THREE.LineSegments(edges, new THREE.LineBasicMaterial({ color: 0xffffff, linewidth: 2.0 }));
-                        child.add(line);
+                        if (child.material) child.material.fog = false;
                     }
                 });
 
-                configureShadows(porscheClone, true, true);
+                configureShadows(porscheClone, false, false); // PERF: void object — no visible shadows
                 this.scene.add(porscheClone);
 
                 // Map reference for manual centripetal orbital pull!
@@ -1153,7 +1152,7 @@ class DioramaScene {
                         }
                     });
 
-                    configureShadows(astClone, true, true);
+                    configureShadows(astClone, false, false); // PERF: void objects — shadows never visible
                     this.scene.add(astClone);
 
                     // Bind it strictly to the Cannon engine mapping its exact mesh limits to a bounding sphere for physics
@@ -1848,7 +1847,7 @@ class DioramaScene {
         if (this.isPhysicsCloakActive) {
             this.renderer.setPixelRatio(1);
         } else {
-            this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+            this.renderer.setPixelRatio(1);
         }
     }
 
