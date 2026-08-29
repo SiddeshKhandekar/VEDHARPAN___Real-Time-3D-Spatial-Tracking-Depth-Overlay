@@ -1010,6 +1010,88 @@ class DioramaScene {
             (error) => console.error('Error loading Porsche Model:', error)
         );
 
+        // Universal Swarm Loader for injecting dynamic randomized geometry explicitly into the 3D Lissajous trajectory
+        const spawnSwarmAsteroid = (fileName, targetWidth, mass) => {
+            loader.load(
+                `assets/${fileName}`,
+                (gltf) => {
+                    const astClone = gltf.scene;
+
+                    // Compute absolute native scale to force specific size limits proportionally
+                    astClone.updateMatrixWorld(true);
+                    const pBox = new THREE.Box3().setFromObject(astClone);
+                    const naturalWidth = pBox.max.x - pBox.min.x;
+                    const pScale = targetWidth / naturalWidth;
+                    astClone.scale.set(pScale, pScale, pScale);
+
+                    // Randomly instantiate across the map initially
+                    astClone.position.set(
+                        (Math.random() - 0.5) * 400,
+                        (Math.random() - 0.5) * 400,
+                        (Math.random() - 0.5) * 400
+                    );
+
+                    // Suppress lighting/fog visual bleeding
+                    astClone.traverse((child) => {
+                        if (child.isMesh && child.material) child.material.fog = false;
+                    });
+
+                    configureShadows(astClone, true, true);
+                    this.scene.add(astClone);
+
+                    // Bind it strictly to the Cannon engine mapping its exact mesh limits to a bounding sphere for physics
+                    const radiusScale = targetWidth * 0.5;
+                    const body = this.physicsWorld.addDynamicBody(astClone, mass, 'sphere', radiusScale);
+
+                    body.ignoreGravity = true;
+                    body.linearDamping = 0.0;
+                    body.angularDamping = 0.0;
+
+                    // Bind exactly into the Lissajous loop!
+                    body.isSwarmProp = true;
+                    body.swarmPhaseOffset = Math.random() * 2000.0;
+
+                    // Setup Kinetic Explosive Trigger native to the Cannon Event Framework!
+                    body.addEventListener("collide", (e) => {
+                        if (e.contact) {
+                            const velocityImpact = Math.abs(e.contact.getImpactVelocityAlongNormal());
+                            if (velocityImpact > 1.5) { // Threshold suppresses tiny gentle grazing bumps
+                                const contactPoint = e.contact.rj;
+                                const rigidPos = body.position;
+                                // Resolve absolute geometry coordinate mapping
+                                const visualImpactPoint = new THREE.Vector3(
+                                    rigidPos.x + contactPoint.x,
+                                    rigidPos.y + contactPoint.y,
+                                    rigidPos.z + contactPoint.z
+                                );
+                                // Visually deploy the sparks/dust locally from effects.js!
+                                if (this.effects) {
+                                    this.effects.createExplosion(visualImpactPoint, 2);
+                                }
+                            }
+                        }
+                    });
+
+                },
+                undefined,
+                (err) => console.error(`Error generating dynamic swarm object ${fileName}:`, err)
+            );
+        };
+
+        // Mathematically deploy the structural varieties (2 clones of each to avoid utterly nuking the framerate)
+        for (let i = 0; i < 2; i++) {
+            // wandering_asteroids_of_andromeda -> Medium 
+            spawnSwarmAsteroid('wandering_asteroids_of_andromeda.glb', 15.0, 800.0);
+
+            // asteroid_field_100_x_medium-poly -> Small
+            spawnSwarmAsteroid('asteroid_field_100_x_medium-poly.glb', 40.0, 1500.0);
+
+            // asteroid.glb -> Big 
+            spawnSwarmAsteroid('asteroid.glb', 25.0, 2500.0);
+        }
+
+
+
         // 5. Load City Map
         loader.load(
             `${assetPath}scene.gltf`,
@@ -1742,6 +1824,11 @@ class DioramaScene {
                 // Ensure they don't break velocity limits when drifting tightly
                 if (b.velocity.length() > 20) {
                     b.velocity.scale(0.95, b.velocity); // Cap orbital max velocity for smooth drift
+                }
+
+                // Force extremely slow, majestic cinematic tumbling universally inside Swarm physics arrays
+                if (b.angularVelocity.length() > 0.02) { // 0.02 radians/sec ~ 1 degree per second max speed for giant boulders
+                    b.angularVelocity.scale(0.85, b.angularVelocity);
                 }
 
                 // If it is the Porsche, explicitly steer its visual chassis directly into the wind vector smoothly
