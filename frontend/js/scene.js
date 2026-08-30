@@ -2090,7 +2090,7 @@ class DioramaScene {
                 this.inputManager.keys['d'] = false;
                 this.inputManager.isShooting = false;
             }
-            this.mechaController.update(this.inputManager, dt);
+            this.mechaController.update(this.inputManager, dt, this.cameraMode);
         }
         if (this.effects) this.effects.update(dt);
 

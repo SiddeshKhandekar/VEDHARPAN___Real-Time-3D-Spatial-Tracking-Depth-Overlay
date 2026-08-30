@@ -261,11 +261,11 @@ export class MechaController {
         this.mesh.add(this.boostBrackets);
     }
 
-    update(inputManager, dt) {
+    update(inputManager, dt, cameraMode = 1) {
         if (this.shieldWireLOD) this.shieldWireLOD.update(this.camera);
         // ── Flight Mode: override gravity and apply 3D movement ───────────────
         if (this.flightActive) {
-            this._updateFlight(inputManager, dt);
+            this._updateFlight(inputManager, dt, cameraMode);
         } else {
             // ── Ground Movement ───────────────────────────────────────────────
             const moveDir = new THREE.Vector3();
@@ -509,7 +509,7 @@ export class MechaController {
      * WASD (3D camera-relative), Numpad8/2 (altitude), Numpad4/6 (yaw),
      * Left Shift (speed boost in exact camera forward direction).
      */
-    _updateFlight(inputManager, dt) {
+    _updateFlight(inputManager, dt, cameraMode = 1) {
         const FLIGHT_SPEED = 12.0;    // normal cruise units/sec
         const BOOST_SPEED = 55.0;    // full boost units/sec
         const VERTICAL_SPEED = 8.0;     // numpad up/down units/sec
@@ -527,61 +527,74 @@ export class MechaController {
         );
 
         // -- Numpad4/6 yaw: rotate both mecha body AND camera orbit ---------
-        const yawLeft = !!(inputManager.actions?.['flightTurnLeft']);
-        const yawRight = !!(inputManager.actions?.['flightTurnRight']);
-        if (yawLeft || yawRight) {
-            const delta = (yawLeft ? 1 : -1) * YAW_SPEED * dt;
-            const yawDeltaQuat = new CANNON.Quaternion();
-            yawDeltaQuat.setFromAxisAngle(new CANNON.Vec3(0, 1, 0), delta);
-            this.body.quaternion = this.body.quaternion.mult(yawDeltaQuat);
-            // Tell scene.js to rotate orbitYaw so the camera follows
-            window.dispatchEvent(new CustomEvent('flightYawDelta', { detail: { delta } }));
-        }
+        let yawLeft = false;
+        let yawRight = false;
+        let isBoostKey = false;
+        let canBoost = false;
+        const moveVel = new THREE.Vector3();
 
-        // -- Mouse -> mecha yaw: lerp toward camera facing ONLY when no numpad yaw ---
-        if (!yawLeft && !yawRight) {
-            const camFwd3D = new THREE.Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion);
-            const yawAngle = Math.atan2(camFwd3D.x, camFwd3D.z);
-            const targetFacingQuat = new CANNON.Quaternion();
-            targetFacingQuat.setFromAxisAngle(new CANNON.Vec3(0, 1, 0), yawAngle);
-            this.body.quaternion.slerp(targetFacingQuat, 0.12, this.body.quaternion);
-        }
+        if (cameraMode !== 0) {
+            yawLeft = !!(inputManager.actions?.['flightTurnLeft']);
+            yawRight = !!(inputManager.actions?.['flightTurnRight']);
 
-        // -- Boost logic -------------------------------------------------------
-        const isBoostKey = !!(inputManager.actions?.['flightBoost']);
-        const canBoost = !this.isBoostDepleted && isBoostKey && this.boostEnergy > 0;
+            if (yawLeft || yawRight) {
+                const delta = (yawLeft ? 1 : -1) * YAW_SPEED * dt;
+                const yawDeltaQuat = new CANNON.Quaternion();
+                yawDeltaQuat.setFromAxisAngle(new CANNON.Vec3(0, 1, 0), delta);
+                this.body.quaternion = this.body.quaternion.mult(yawDeltaQuat);
+                // Tell scene.js to rotate orbitYaw so the camera follows
+                window.dispatchEvent(new CustomEvent('flightYawDelta', { detail: { delta } }));
+            }
 
-        if (canBoost) {
-            this.boostEnergy = Math.max(0, this.boostEnergy - dt);
-            if (this.boostEnergy <= 0) this.isBoostDepleted = true;
+            // -- Mouse -> mecha yaw: lerp toward camera facing ONLY when no numpad yaw ---
+            if (!yawLeft && !yawRight) {
+                const camFwd3D = new THREE.Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion);
+                const yawAngle = Math.atan2(camFwd3D.x, camFwd3D.z);
+                const targetFacingQuat = new CANNON.Quaternion();
+                targetFacingQuat.setFromAxisAngle(new CANNON.Vec3(0, 1, 0), yawAngle);
+                this.body.quaternion.slerp(targetFacingQuat, 0.12, this.body.quaternion);
+            }
+
+            // -- Boost logic -------------------------------------------------------
+            isBoostKey = !!(inputManager.actions?.['flightBoost']);
+            canBoost = !this.isBoostDepleted && isBoostKey && this.boostEnergy > 0;
+
+            if (canBoost) {
+                this.boostEnergy = Math.max(0, this.boostEnergy - dt);
+                if (this.boostEnergy <= 0) this.isBoostDepleted = true;
+            } else {
+                // Regen only when NOT holding boost OR when fully depleted (must wait for full)
+                if (!isBoostKey || this.isBoostDepleted) {
+                    this.boostEnergy = Math.min(this.boostEnergyMax, this.boostEnergy + this.boostRegenRate * dt);
+                    if (this.boostEnergy >= this.boostEnergyMax) this.isBoostDepleted = false;
+                }
+            }
+
+            // -- Build target velocity vector -------------------------------------
+            if (canBoost) {
+                // Boost: exact 3D camera forward (includes vertical pitch)
+                const boostDir = new THREE.Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion).normalize();
+                moveVel.copy(boostDir).multiplyScalar(BOOST_SPEED);
+            } else {
+                const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion).normalize();
+                const rgt = new THREE.Vector3(1, 0, 0).applyQuaternion(this.camera.quaternion).normalize();
+
+                if (inputManager.keys['w']) moveVel.addScaledVector(fwd, FLIGHT_SPEED);
+                if (inputManager.keys['s']) moveVel.addScaledVector(fwd, -FLIGHT_SPEED);
+                if (inputManager.keys['a']) moveVel.addScaledVector(rgt, -FLIGHT_SPEED);
+                if (inputManager.keys['d']) moveVel.addScaledVector(rgt, FLIGHT_SPEED);
+
+                const isUp = !!(inputManager.actions?.['flightUp']);
+                const isDown = !!(inputManager.actions?.['flightDown']);
+                if (isUp) moveVel.y += VERTICAL_SPEED;
+                if (isDown) moveVel.y -= VERTICAL_SPEED;
+            }
         } else {
-            // Regen only when NOT holding boost OR when fully depleted (must wait for full)
-            if (!isBoostKey || this.isBoostDepleted) {
+            // Free Roam mode: passively regenerate boost, ignore movement inputs
+            if (!this.isBoostDepleted) {
                 this.boostEnergy = Math.min(this.boostEnergyMax, this.boostEnergy + this.boostRegenRate * dt);
                 if (this.boostEnergy >= this.boostEnergyMax) this.isBoostDepleted = false;
             }
-        }
-
-        // -- Build target velocity vector -------------------------------------
-        const moveVel = new THREE.Vector3();
-
-        if (canBoost) {
-            // Boost: exact 3D camera forward (includes vertical pitch)
-            const boostDir = new THREE.Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion).normalize();
-            moveVel.copy(boostDir).multiplyScalar(BOOST_SPEED);
-        } else {
-            const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion).normalize();
-            const rgt = new THREE.Vector3(1, 0, 0).applyQuaternion(this.camera.quaternion).normalize();
-
-            if (inputManager.keys['w']) moveVel.addScaledVector(fwd, FLIGHT_SPEED);
-            if (inputManager.keys['s']) moveVel.addScaledVector(fwd, -FLIGHT_SPEED);
-            if (inputManager.keys['a']) moveVel.addScaledVector(rgt, -FLIGHT_SPEED);
-            if (inputManager.keys['d']) moveVel.addScaledVector(rgt, FLIGHT_SPEED);
-
-            const isUp = !!(inputManager.actions?.['flightUp']);
-            const isDown = !!(inputManager.actions?.['flightDown']);
-            if (isUp) moveVel.y += VERTICAL_SPEED;
-            if (isDown) moveVel.y -= VERTICAL_SPEED;
         }
 
         // Apply or damp — using lerp for smooth acceleration, dt-scaled damping for coast
