@@ -502,6 +502,9 @@ export class MechaController {
                 thresholdEl.style.display = 'block';
             }
         }
+
+        // -- Engine plume visuals (always running to process shutdown transitions) --
+        this._updatePlumes(inputManager, dt, cameraMode);
     } // <-- closing brace for update()
 
     /**
@@ -644,9 +647,6 @@ export class MechaController {
             spdEl.textContent = spd3D.toFixed(1);
         }
 
-        // -- Engine plume visuals ----------------------------------------------
-        this._updatePlumes(inputManager, dt, cameraMode);
-
         // -- Flight shooting: left-click fires along 3D camera forward, no aim required ----
         // For rapid fire (mode 2), check mouseState.left; for single fire, use isShooting.
         const isFiring = inputManager.isShooting ||
@@ -746,18 +746,44 @@ export class MechaController {
     /**
      * Load engine plume GLB and instantiate 5 named emitter slots,
      * parented to the mecha wrapper. Call once after construction.
+     *
+     * POSITION NOTE: mechaWrapper is unscaled; mechaModel inside it has:
+     *   position.y = 2.35 (raised above wrapper origin)
+     *   scale      = 0.6
+     *   rotation   = (0,0,0) → mecha faces camera (+Z in world)
+     *   so mecha BACK is at NEGATIVE Z in wrapper-local space.
+     *
+     * ROTATION NOTE: plume GLB emits in its own +Y by default (upward).
+     *   rot.x = Math.PI flips the emission to fire in LOCAL -Y, which
+     *   after pivot placement on the back fires AWAY from the mecha.
      */
     loadPlumes(loader) {
+        // Local offsets relative to mechaWrapper (unscaled):
+        //   y: mecha feet ~2.35, torso ~3.5, shoulder ~4.4, head ~5.3
+        //   z: mecha back exits at roughly z = -0.5 to -1.0 (negative = away from camera)
+        //   rot.x = Math.PI  → flip plume fire direction from +Y to -Y
+        //   additional tilt angles are applied on top.
         const SLOTS = [
-            { name: 'shoulderL', pos: [-0.55, 3.55, 0.10], rot: [-0.35, 0, 0.25], scale: 0.38 },
-            { name: 'shoulderR', pos: [0.55, 3.55, 0.10], rot: [-0.35, 0, -0.25], scale: 0.38 },
-            { name: 'backMain', pos: [0.0, 2.85, 0.55], rot: [-0.55, 0, 0.00], scale: 0.55 },
-            { name: 'sideL', pos: [-0.52, 2.50, 0.48], rot: [-0.45, 0.35, 0.00], scale: 0.42 },
-            { name: 'sideR', pos: [0.52, 2.50, 0.48], rot: [-0.45, -0.35, 0.00], scale: 0.42 },
+            // Shoulder vents — upper back, slightly outward
+            { name: 'shoulderL', pos: [-0.65, 4.35, -0.35], rot: [Math.PI + 0.3, 0, 0.2], scale: 0.32 },
+            { name: 'shoulderR', pos: [0.65, 4.35, -0.35], rot: [Math.PI + 0.3, 0, -0.2], scale: 0.32 },
+            // Main central back thruster
+            { name: 'backMain', pos: [0.0, 2.30, -0.85], rot: [Math.PI + 0.15, 0, 0.0], scale: 0.70 },
+            // Side nacelle boosters — flanking the torso (only active during boost, facing backwards)
+            { name: 'sideL', pos: [-0.55, 3.15, -0.50], rot: [Math.PI * 1.5 + 0.2, -0.1, 0], scale: 0.36 },
+            { name: 'sideR', pos: [0.55, 3.15, -0.50], rot: [Math.PI * 1.5 + 0.2, 0.1, 0], scale: 0.36 },
         ];
+
+        // Fire colors — orange-yellow gradient
+        this.PLUME_COLOR_FIRE = new THREE.Color(0xFF6600); // deep orange core
+        this.PLUME_COLOR_FIRE2 = new THREE.Color(0xFFAA00); // yellow outer
+        // Boost colors — electric orange-blue
+        this.PLUME_COLOR_BOOST = new THREE.Color(0xFF3300); // hot orange
+        this.PLUME_COLOR_BOOST2 = new THREE.Color(0x0088FF); // electric blue
 
         this.plumes = {};
         this.plumeReady = false;
+        this._boostColorActive = false; // track last color state
 
         loader.load('assets/simple_engine_plume_test.glb', (gltf) => {
             const baseScene = gltf.scene;
@@ -767,13 +793,19 @@ export class MechaController {
                 const clone = baseScene.clone(true);
                 clone.visible = false;
 
-                // Additive blending so plumes glow on top of the mecha skin
+                // Collect emissive meshes for color control
+                const emissiveMeshes = [];
                 clone.traverse(child => {
                     if (child.isMesh && child.material) {
                         child.material = child.material.clone();
                         child.material.blending = THREE.AdditiveBlending;
                         child.material.depthWrite = false;
                         child.material.transparent = true;
+                        // Stamp fire colour on load
+                        child.material.color.set(this.PLUME_COLOR_FIRE);
+                        if (child.material.emissive) child.material.emissive.set(this.PLUME_COLOR_FIRE2);
+                        if (child.material.emissiveIntensity !== undefined) child.material.emissiveIntensity = 1.4;
+                        emissiveMeshes.push(child);
                     }
                 });
 
@@ -792,7 +824,7 @@ export class MechaController {
                     action.play();
                 }
 
-                this.plumes[slot.name] = { mesh: clone, pivot, mixer, action, baseScale: slot.scale };
+                this.plumes[slot.name] = { mesh: clone, pivot, mixer, action, baseScale: slot.scale, emissiveMeshes };
             });
 
             this.plumeReady = true;
@@ -802,14 +834,31 @@ export class MechaController {
         });
     }
 
+    /** Tint all meshes in a plume slot to fire or boost colors. */
+    _setPlumeTint(plume, isBoosting) {
+        const col = isBoosting ? this.PLUME_COLOR_BOOST : this.PLUME_COLOR_FIRE;
+        const col2 = isBoosting ? this.PLUME_COLOR_BOOST2 : this.PLUME_COLOR_FIRE2;
+        plume.emissiveMeshes.forEach(child => {
+            child.material.color.set(col);
+            if (child.material.emissive) child.material.emissive.set(col2);
+        });
+    }
+
     /**
-     * Drive plume visibility, scale, and vectored-thrust yaw each frame.
+     * Drive plume visibility, scale, color, and vectored-thrust yaw each frame.
      * Must be called inside _updateFlight() every tick.
      */
     _updatePlumes(inputManager, dt, cameraMode) {
         if (!this.plumeReady) return;
 
-        const active = cameraMode !== 0;
+        const active = cameraMode !== 0 && this.flightActive;
+
+        // If flight mode is deactivated while in flight mode, shut down all visuals
+        if (!active) {
+            Object.values(this.plumes).forEach(p => p.mesh.visible = false);
+            return;
+        }
+
         const isUp = active && !!(inputManager.actions?.['flightUp']);
         const isDown = active && !!(inputManager.actions?.['flightDown']);
         const isLeft = active && !!(inputManager.keys?.['a']);
@@ -818,29 +867,56 @@ export class MechaController {
             && !!(inputManager.actions?.['flightBoost'])
             && this.boostEnergy > 0;
 
-        // Shoulder plumes (Red) — visible only when descending
+        // Retint all slots when boost state changes (avoid per-frame traversal)
+        if (isBoosting !== this._boostColorActive) {
+            this._boostColorActive = isBoosting;
+            Object.values(this.plumes).forEach(p => this._setPlumeTint(p, isBoosting));
+        }
+
+        // ── Shoulder plumes — visible only when descending ─────────────────────
         ['shoulderL', 'shoulderR'].forEach(name => {
             const p = this.plumes[name];
             p.mesh.visible = isDown;
             if (isDown) p.mixer.update(dt);
         });
 
-        // Back main thruster (Yellow) — always on, big when ascending
+        // ── Back main thruster — always on in flight, big when ascending or boosting ───────
         const bp = this.plumes['backMain'];
         bp.mesh.visible = true;
-        const targetScale = isUp ? bp.baseScale * 2.4 : bp.baseScale * 0.65;
+        const targetScale = (isUp || isBoosting) ? bp.baseScale * 2.4 : bp.baseScale * 0.65;
         const curS = bp.pivot.scale.x;
         bp.pivot.scale.setScalar(curS + (targetScale - curS) * Math.min(1, dt * 7));
-        // Vectored-thrust yaw: lean opposite to strafe
+
+        // Dynamic anchoring: shift the exhaust down on the Y axis when scaled up
+        // to prevent the massive flame from clipping upward into the mecha body.
+        // We only apply this drop when purely ascending, otherwise it decouples the horizontal boost jet.
+        const basePosY = 2.30;
+        const targetPosY = (isUp && !isBoosting) ? (basePosY - 0.90) : basePosY;
+        bp.pivot.position.y += (targetPosY - bp.pivot.position.y) * Math.min(1, dt * 7);
+
+        // Vectored-thrust yaw: lean opposite to strafe direction (using Z axis since the plume emits vertically)
         const yawTarget = isLeft ? 0.42 : isRight ? -0.42 : 0.0;
-        bp.pivot.rotation.y += (yawTarget - bp.pivot.rotation.y) * Math.min(1, dt * 8);
+        bp.pivot.rotation.z += (yawTarget - bp.pivot.rotation.z) * Math.min(1, dt * 8);
+
+        // Speed illusion: pitch backward by 90 degrees (+Math.PI/2) during boost
+        // Math.PI points down. 1.5 * Math.PI points perfectly backward.
+        const pitchTarget = isBoosting ? (Math.PI + 0.15 + Math.PI / 2) : (Math.PI + 0.15);
+        bp.pivot.rotation.x += (pitchTarget - bp.pivot.rotation.x) * Math.min(1, dt * 8);
+
+        // Dynamic length: stretch the flame backwards heavily when boosting (3.0x multiplier)
+        const lengthTarget = isBoosting ? 3.0 : (isUp ? 2.5 : 1.5);
+        const curLen = bp.mesh.scale.y;
+        bp.mesh.scale.set(1, curLen + (lengthTarget - curLen) * Math.min(1, dt * 8), 1);
+
         bp.mixer.update(dt);
 
-        // Side nacelle plumes (Blue) — boost only
+        // ── Side nacelle plumes — boost only ─────────────────────────────────
         ['sideL', 'sideR'].forEach(name => {
             const p = this.plumes[name];
             p.mesh.visible = isBoosting;
             if (isBoosting) {
+                // Stretch the mesh on its local Y axis to make it visibly longer
+                p.mesh.scale.set(1, 2.5, 1);
                 p.pivot.scale.setScalar(p.baseScale * 1.55);
                 p.mixer.update(dt);
             }
