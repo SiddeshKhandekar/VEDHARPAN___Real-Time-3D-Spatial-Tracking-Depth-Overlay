@@ -160,6 +160,11 @@ class DioramaScene {
 
         // 9. Event Listeners
         window.addEventListener('resize', () => this.onWindowResize());
+        window.addEventListener('flightYawDelta', (e) => {
+            if (this.cameraMode === 1 || this.cameraMode === 3) {
+                this.orbitYaw += e.detail.delta;
+            }
+        });
 
 
         // Main Menu Buttons
@@ -2012,7 +2017,7 @@ class DioramaScene {
                     let targetCamPos = mechaPos.clone().add(offset);
                     const centerPoint = mechaPos.clone().add(new THREE.Vector3(0, 4.35, 0));
                     targetCamPos = this._applyCameraCollision(centerPoint, targetCamPos);
-                    this.camera.position.lerp(targetCamPos, 0.12);
+                    this.camera.position.lerp(targetCamPos, Math.min(1.0, dt * 8.0));
                     this.camera.lookAt(mechaPos.clone().add(new THREE.Vector3(0, 3.85, 0)));
                     this.camera.clearViewOffset();
                 }

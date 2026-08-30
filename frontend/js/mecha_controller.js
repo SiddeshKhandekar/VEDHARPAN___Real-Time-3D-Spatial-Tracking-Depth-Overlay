@@ -222,33 +222,36 @@ export class MechaController {
         });
 
         // Build a pair of bracket arcs (left = negative X, right = positive X)
-        // Brackets are positioned far left/right so the mecha sits inside the curved C-shape.
-        const BRACKET_X = 4.5;  // horizontal distance from mecha centre-line
-        const BRACKET_Y = 2.5;  // torso height
-        const TORUS_R = 1.8;  // arc radius (taller, narrower than before)
-        const TORUS_TUBE = 0.06; // tube thinness
-        const ARC_ANGLE = Math.PI * 0.7; // how far around the C curves
+        // Each arc is oriented via rotation.y = Math.PI/2 so the torus sweeps in the YZ-plane
+        // and appears as a vertical ( ) parenthesis shape when seen from the camera.
+        const BRACKET_X = 6.0;          // units from mecha centre-line
+        const BRACKET_Y = 2.5;          // torso height offset
+        const TORUS_R = 2.2;          // arc circle radius
+        const TORUS_TUBE = 0.07;         // tube thickness
+        const ARC_ANGLE = Math.PI * 0.75; // 135° arc — the open gap faces outward
 
         for (const side of [-1, 1]) {
-            const rotZ_bg = side === -1 ? Math.PI * 0.15 : Math.PI + Math.PI * 0.85;
-            const rotZ_fill = rotZ_bg;
+            // rotZ: rotate the arc so the gap faces outward (away from mecha).
+            // Left bracket: gap faces left  → rotZ = -Math.PI * 0.125
+            // Right bracket: gap faces right → rotZ =  Math.PI * 0.875 (= PI + PI*-0.125 flipped)
+            const rotZ = side === -1 ? -Math.PI * 0.125 : Math.PI * 0.875;
 
             // Background track arc
             const bgArc = new THREE.Mesh(
-                new THREE.TorusGeometry(TORUS_R, TORUS_TUBE, 4, 24, ARC_ANGLE),
+                new THREE.TorusGeometry(TORUS_R, TORUS_TUBE, 4, 32, ARC_ANGLE),
                 bracketBgMat.clone()
             );
             bgArc.position.set(side * BRACKET_X, BRACKET_Y, 0);
-            bgArc.rotation.z = rotZ_bg;
+            bgArc.rotation.set(0, Math.PI / 2, rotZ); // y-rotation makes arc face camera
             this.boostBrackets.add(bgArc);
 
             // Fill torus
             const fillArc = new THREE.Mesh(
-                new THREE.TorusGeometry(TORUS_R, TORUS_TUBE + 0.01, 4, 24, ARC_ANGLE),
+                new THREE.TorusGeometry(TORUS_R, TORUS_TUBE + 0.01, 4, 32, ARC_ANGLE),
                 bracketMat.clone()
             );
             fillArc.position.set(side * BRACKET_X, BRACKET_Y, 0);
-            fillArc.rotation.z = rotZ_fill;
+            fillArc.rotation.set(0, Math.PI / 2, rotZ);
             fillArc.userData.isFill = true;
             fillArc.userData.side = side;
             this.boostBrackets.add(fillArc);
@@ -511,7 +514,10 @@ export class MechaController {
         const BOOST_SPEED = 55.0;    // full boost units/sec
         const VERTICAL_SPEED = 8.0;     // numpad up/down units/sec
         const YAW_SPEED = 1.8;     // rad/sec for numpad yaw
-        const DAMPING = 0.88;    // per-frame velocity bleed
+        // Frame-rate independent damping: equivalent to 0.88 per-frame at 60 FPS
+        const dampFactor = Math.pow(0.88, dt * 60);
+        // Velocity lerp strength: high = responsive, approaches instant at ~10 units/sec
+        const velLerp = Math.min(1.0, dt * 10);
 
         // -- Kill gravity: apply inverse gravitational force every tick ---------
         const grav = this.physicsWorld.world.gravity;
@@ -520,12 +526,26 @@ export class MechaController {
             new CANNON.Vec3(0, 0, 0)
         );
 
-        // -- Mouse -> mecha yaw: mecha always faces where camera looks ----------
-        const camFwd3D = new THREE.Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion);
-        const yawAngle = Math.atan2(camFwd3D.x, camFwd3D.z);
-        const targetFacingQuat = new CANNON.Quaternion();
-        targetFacingQuat.setFromAxisAngle(new CANNON.Vec3(0, 1, 0), yawAngle);
-        this.body.quaternion.slerp(targetFacingQuat, 0.12, this.body.quaternion);
+        // -- Numpad4/6 yaw: rotate both mecha body AND camera orbit ---------
+        const yawLeft = !!(inputManager.actions?.['flightTurnLeft']);
+        const yawRight = !!(inputManager.actions?.['flightTurnRight']);
+        if (yawLeft || yawRight) {
+            const delta = (yawLeft ? 1 : -1) * YAW_SPEED * dt;
+            const yawDeltaQuat = new CANNON.Quaternion();
+            yawDeltaQuat.setFromAxisAngle(new CANNON.Vec3(0, 1, 0), delta);
+            this.body.quaternion = this.body.quaternion.mult(yawDeltaQuat);
+            // Tell scene.js to rotate orbitYaw so the camera follows
+            window.dispatchEvent(new CustomEvent('flightYawDelta', { detail: { delta } }));
+        }
+
+        // -- Mouse -> mecha yaw: lerp toward camera facing ONLY when no numpad yaw ---
+        if (!yawLeft && !yawRight) {
+            const camFwd3D = new THREE.Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion);
+            const yawAngle = Math.atan2(camFwd3D.x, camFwd3D.z);
+            const targetFacingQuat = new CANNON.Quaternion();
+            targetFacingQuat.setFromAxisAngle(new CANNON.Vec3(0, 1, 0), yawAngle);
+            this.body.quaternion.slerp(targetFacingQuat, 0.12, this.body.quaternion);
+        }
 
         // -- Boost logic -------------------------------------------------------
         const isBoostKey = !!(inputManager.actions?.['flightBoost']);
@@ -564,15 +584,19 @@ export class MechaController {
             if (isDown) moveVel.y -= VERTICAL_SPEED;
         }
 
-        // Apply or damp
+        // Apply or damp — using lerp for smooth acceleration, dt-scaled damping for coast
         if (moveVel.lengthSq() > 0) {
-            this.body.velocity.x = moveVel.x;
-            this.body.velocity.z = moveVel.z;
-            this.body.velocity.y = moveVel.y !== 0 ? moveVel.y : this.body.velocity.y * DAMPING;
+            this.body.velocity.x += (moveVel.x - this.body.velocity.x) * velLerp;
+            this.body.velocity.z += (moveVel.z - this.body.velocity.z) * velLerp;
+            if (moveVel.y !== 0) {
+                this.body.velocity.y += (moveVel.y - this.body.velocity.y) * velLerp;
+            } else {
+                this.body.velocity.y *= dampFactor;
+            }
         } else {
-            this.body.velocity.x *= DAMPING;
-            this.body.velocity.y *= DAMPING;
-            this.body.velocity.z *= DAMPING;
+            this.body.velocity.x *= dampFactor;
+            this.body.velocity.y *= dampFactor;
+            this.body.velocity.z *= dampFactor;
         }
 
         // -- Altitude ring: stays level in world space -------------------------
