@@ -1644,14 +1644,17 @@ class DioramaScene {
                 this.freeRoamOffset.add(trueForward.multiplyScalar(flightSpeed));
             }
 
-            if (acts['frForward']) this.freeRoamOffset.add(forward.clone().multiplyScalar(moveSpeed));
-            if (acts['frBackward']) this.freeRoamOffset.sub(forward.clone().multiplyScalar(moveSpeed));
+            // frForward/frBackward share numpad8/2 keys with flightUp/flightDown.
+            // Read both action names so numpad works in both Free Roam and Flight.
+            if (acts['frForward'] || acts['flightUp']) this.freeRoamOffset.add(forward.clone().multiplyScalar(moveSpeed));
+            if (acts['frBackward'] || acts['flightDown']) this.freeRoamOffset.sub(forward.clone().multiplyScalar(moveSpeed));
             if (acts['frLeft']) this.freeRoamOffset.sub(right.clone().multiplyScalar(moveSpeed));
             if (acts['frRight']) this.freeRoamOffset.add(right.clone().multiplyScalar(moveSpeed));
 
             const rotSpeed = 2.0 * (dt || 1 / 60);
-            if (acts['frRotLeft']) this.orbitYaw += rotSpeed;
-            if (acts['frRotRight']) this.orbitYaw -= rotSpeed;
+            // frRotLeft/frRotRight share numpad4/6 with flightTurnLeft/flightTurnRight.
+            if (acts['frRotLeft'] || acts['flightTurnLeft']) this.orbitYaw += rotSpeed;
+            if (acts['frRotRight'] || acts['flightTurnRight']) this.orbitYaw -= rotSpeed;
 
             if (acts['frUp']) this.freeRoamOffset.y += moveSpeed;
             if (acts['frDown']) this.freeRoamOffset.y -= moveSpeed;

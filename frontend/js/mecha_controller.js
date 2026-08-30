@@ -156,7 +156,7 @@ export class MechaController {
 
         // Outer horizon torus
         const ringMat = new THREE.MeshBasicMaterial({
-            color: 0x00f2fe, transparent: true, opacity: 0.35, depthWrite: false, fog: false
+            color: 0x00f2fe, transparent: true, opacity: 0.15, depthWrite: false, fog: false
         });
         const horizonTorus = new THREE.Mesh(
             new THREE.TorusGeometry(3.2, 0.025, 8, 72),
@@ -167,12 +167,12 @@ export class MechaController {
         // Inner tighter ring
         const innerTorus = new THREE.Mesh(
             new THREE.TorusGeometry(2.0, 0.015, 6, 48),
-            new THREE.MeshBasicMaterial({ color: 0x00f2fe, transparent: true, opacity: 0.20, depthWrite: false, fog: false })
+            new THREE.MeshBasicMaterial({ color: 0x00f2fe, transparent: true, opacity: 0.10, depthWrite: false, fog: false })
         );
         this.altitudeRing.add(innerTorus);
 
         // Tick marks every 10 degrees around the outer ring
-        const tickMat = new THREE.MeshBasicMaterial({ color: 0x00f2fe, transparent: true, opacity: 0.5, depthWrite: false, fog: false });
+        const tickMat = new THREE.MeshBasicMaterial({ color: 0x00f2fe, transparent: true, opacity: 0.22, depthWrite: false, fog: false });
         for (let i = 0; i < 36; i++) {
             const angle = (i / 36) * Math.PI * 2;
             const isMajor = i % 9 === 0;
@@ -187,7 +187,7 @@ export class MechaController {
         }
 
         // Pitch ladder: 4 arcs above and below equator
-        const pitchArcMat = new THREE.MeshBasicMaterial({ color: 0x00f2fe, transparent: true, opacity: 0.25, depthWrite: false, fog: false });
+        const pitchArcMat = new THREE.MeshBasicMaterial({ color: 0x00f2fe, transparent: true, opacity: 0.12, depthWrite: false, fog: false });
         for (let j = 1; j <= 4; j++) {
             const pitchAngle = (j / 5) * (Math.PI / 2); // 0 to 90 deg
             for (const sign of [1, -1]) {
@@ -202,7 +202,7 @@ export class MechaController {
         }
 
         // Vertical velocity needle (points up/down based on vy)
-        const needleMat = new THREE.MeshBasicMaterial({ color: 0x00ffff, transparent: true, opacity: 0.7, depthWrite: false, fog: false });
+        const needleMat = new THREE.MeshBasicMaterial({ color: 0x00ffff, transparent: true, opacity: 0.35, depthWrite: false, fog: false });
         this.altNeedle = new THREE.Mesh(new THREE.BoxGeometry(0.04, 1.2, 0.04), needleMat);
         this.altNeedle.position.set(0, 0, 3.2);
         this.altitudeRing.add(this.altNeedle);
@@ -222,26 +222,35 @@ export class MechaController {
         });
 
         // Build a pair of bracket arcs (left = negative X, right = positive X)
+        // Brackets are positioned far left/right so the mecha sits inside the curved C-shape.
+        const BRACKET_X = 4.5;  // horizontal distance from mecha centre-line
+        const BRACKET_Y = 2.5;  // torso height
+        const TORUS_R = 1.8;  // arc radius (taller, narrower than before)
+        const TORUS_TUBE = 0.06; // tube thinness
+        const ARC_ANGLE = Math.PI * 0.7; // how far around the C curves
+
         for (const side of [-1, 1]) {
+            const rotZ_bg = side === -1 ? Math.PI * 0.15 : Math.PI + Math.PI * 0.85;
+            const rotZ_fill = rotZ_bg;
+
             // Background track arc
             const bgArc = new THREE.Mesh(
-                new THREE.TorusGeometry(2.5, 0.06, 4, 24, Math.PI * 0.75),
+                new THREE.TorusGeometry(TORUS_R, TORUS_TUBE, 4, 24, ARC_ANGLE),
                 bracketBgMat.clone()
             );
-            bgArc.position.set(side * 2.5, 2.5, 0);
-            bgArc.rotation.z = side === -1 ? -(Math.PI * 0.125) : (Math.PI + Math.PI * 0.125);
+            bgArc.position.set(side * BRACKET_X, BRACKET_Y, 0);
+            bgArc.rotation.z = rotZ_bg;
             this.boostBrackets.add(bgArc);
 
-            // Fill torus (clones will be scaled on Y to simulate draining)
+            // Fill torus
             const fillArc = new THREE.Mesh(
-                new THREE.TorusGeometry(2.5, 0.07, 4, 24, Math.PI * 0.75),
+                new THREE.TorusGeometry(TORUS_R, TORUS_TUBE + 0.01, 4, 24, ARC_ANGLE),
                 bracketMat.clone()
             );
-            fillArc.position.set(side * 2.5, 2.5, 0);
-            fillArc.rotation.z = side === -1 ? -(Math.PI * 0.125) : (Math.PI + Math.PI * 0.125);
+            fillArc.position.set(side * BRACKET_X, BRACKET_Y, 0);
+            fillArc.rotation.z = rotZ_fill;
             fillArc.userData.isFill = true;
             fillArc.userData.side = side;
-            fillArc.userData.baseMat = bracketMat;
             this.boostBrackets.add(fillArc);
         }
 
@@ -597,6 +606,21 @@ export class MechaController {
             );
             spdEl.textContent = spd3D.toFixed(1);
         }
+
+        // -- Flight shooting: left-click fires along 3D camera forward, no aim required ----
+        // For rapid fire (mode 2), check mouseState.left; for single fire, use isShooting.
+        const isFiring = inputManager.isShooting ||
+            (inputManager.fireMode === 2 && inputManager.mouseState?.left);
+        if (isFiring) {
+            // Project aimTarget 80 units along camera forward if no raycast hit is available
+            const camDir = new THREE.Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion).normalize();
+            const farTarget = this.camera.position.clone().addScaledVector(camDir, 80);
+            // Only override if aimTarget is at origin (i.e., no real hit registered)
+            if (this.aimTarget.lengthSq() < 0.1 || !inputManager.aimActive) {
+                this.aimTarget.copy(farTarget);
+            }
+            this.shoot(inputManager.fireMode || 1);
+        }
     }
 
     /**
@@ -610,6 +634,13 @@ export class MechaController {
         // On exit: kill velocity so mecha doesn't rocket away when re-landing
         this.body.velocity.set(0, 0, 0);
         this.body.angularVelocity.set(0, 0, 0);
+
+        // Force-retract shield when entering flight — a flying mecha can't be locked inside a bubble.
+        if (this.flightActive) {
+            this.shieldActiveBase = false;
+            this.isShieldDeployed = false;
+            if (this.shieldMesh) this.shieldMesh.visible = false;
+        }
 
         // 3D overlays visible only in flight
         this.altitudeRing.visible = this.flightActive;
