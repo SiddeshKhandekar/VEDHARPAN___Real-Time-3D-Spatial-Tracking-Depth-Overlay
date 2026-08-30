@@ -44,6 +44,14 @@ export const ACTIONS = {
     frDown: { label: 'Free Roam: Camera Down', group: 'freeRoam', defaultKey: 'numpad9', displayDefault: 'Num 9' },
     frFlight: { label: 'Free Roam: Flight Mode', group: 'freeRoam', defaultKey: 'tab', displayDefault: 'Tab' },
     frRecenter: { label: 'Free Roam: Recenter', group: 'freeRoam', defaultKey: 'numpad5', displayDefault: 'Num 5' },
+
+    // ── Flight Mode ────────────────────────────────────────────────────
+    toggleFlight: { label: 'Toggle Flight Mode', group: 'flight', defaultKey: 'f', displayDefault: 'F' },
+    flightUp: { label: 'Flight: Ascend', group: 'flight', defaultKey: 'numpad8', displayDefault: 'Num 8' },
+    flightDown: { label: 'Flight: Descend', group: 'flight', defaultKey: 'numpad2', displayDefault: 'Num 2' },
+    flightTurnLeft: { label: 'Flight: Yaw Left', group: 'flight', defaultKey: 'numpad4', displayDefault: 'Num 4' },
+    flightTurnRight: { label: 'Flight: Yaw Right', group: 'flight', defaultKey: 'numpad6', displayDefault: 'Num 6' },
+    flightBoost: { label: 'Flight: Speed Boost', group: 'flight', defaultKey: 'shiftleft', displayDefault: 'Left Shift' },
 };
 
 // ── Default graphics / mouse settings ────────────────────────────────────────

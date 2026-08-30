@@ -139,47 +139,160 @@ export class MechaController {
         // because it's kinematic and strictly tethered to the front of the mecha.
         // Instead, we will sync its coordinate transform manually when Active.
         this.physicsWorld.world.addBody(this.shieldPhysics);
+
+        // ── Flight Mode System ────────────────────────────────────────────────
+        this.flightActive = false;
+
+        // Boost energy: max 5 seconds
+        this.boostEnergyMax = 5.0;
+        this.boostEnergy = this.boostEnergyMax;
+        this.boostRegenRate = this.boostEnergyMax / 30.0; // 30 sec full regen
+        this.isBoostDepleted = false; // locked-out when fully empty
+        this.flightYaw = 0; // tracked independently for smooth numpad turning
+
+        // ── Iron Man Attitude / Altitude Indicator Ring ───────────────────────
+        this.altitudeRing = new THREE.Group();
+        this.altitudeRing.visible = false;
+
+        // Outer horizon torus
+        const ringMat = new THREE.MeshBasicMaterial({
+            color: 0x00f2fe, transparent: true, opacity: 0.35, depthWrite: false, fog: false
+        });
+        const horizonTorus = new THREE.Mesh(
+            new THREE.TorusGeometry(3.2, 0.025, 8, 72),
+            ringMat.clone()
+        );
+        this.altitudeRing.add(horizonTorus);
+
+        // Inner tighter ring
+        const innerTorus = new THREE.Mesh(
+            new THREE.TorusGeometry(2.0, 0.015, 6, 48),
+            new THREE.MeshBasicMaterial({ color: 0x00f2fe, transparent: true, opacity: 0.20, depthWrite: false, fog: false })
+        );
+        this.altitudeRing.add(innerTorus);
+
+        // Tick marks every 10 degrees around the outer ring
+        const tickMat = new THREE.MeshBasicMaterial({ color: 0x00f2fe, transparent: true, opacity: 0.5, depthWrite: false, fog: false });
+        for (let i = 0; i < 36; i++) {
+            const angle = (i / 36) * Math.PI * 2;
+            const isMajor = i % 9 === 0;
+            const tickLen = isMajor ? 0.35 : 0.18;
+            const tick = new THREE.Mesh(
+                new THREE.BoxGeometry(0.03, tickLen, 0.03),
+                tickMat
+            );
+            tick.position.set(Math.sin(angle) * 3.2, 0, Math.cos(angle) * 3.2);
+            tick.lookAt(0, 0, 0);
+            this.altitudeRing.add(tick);
+        }
+
+        // Pitch ladder: 4 arcs above and below equator
+        const pitchArcMat = new THREE.MeshBasicMaterial({ color: 0x00f2fe, transparent: true, opacity: 0.25, depthWrite: false, fog: false });
+        for (let j = 1; j <= 4; j++) {
+            const pitchAngle = (j / 5) * (Math.PI / 2); // 0 to 90 deg
+            for (const sign of [1, -1]) {
+                const arc = new THREE.Mesh(
+                    new THREE.TorusGeometry(3.2 * Math.cos(pitchAngle), 0.012, 4, 32, Math.PI * 0.6),
+                    pitchArcMat
+                );
+                arc.position.y = sign * 3.2 * Math.sin(pitchAngle);
+                arc.rotation.y = Math.PI / 2;
+                this.altitudeRing.add(arc);
+            }
+        }
+
+        // Vertical velocity needle (points up/down based on vy)
+        const needleMat = new THREE.MeshBasicMaterial({ color: 0x00ffff, transparent: true, opacity: 0.7, depthWrite: false, fog: false });
+        this.altNeedle = new THREE.Mesh(new THREE.BoxGeometry(0.04, 1.2, 0.04), needleMat);
+        this.altNeedle.position.set(0, 0, 3.2);
+        this.altitudeRing.add(this.altNeedle);
+
+        this.altitudeRing.position.set(0, 2.5, 0); // centered on mecha torso
+        this.mesh.add(this.altitudeRing);
+
+        // ── Boost Bracket Meters (left and right curved cyan arcs) ────────────
+        this.boostBrackets = new THREE.Group();
+        this.boostBrackets.visible = false;
+
+        const bracketMat = new THREE.MeshBasicMaterial({
+            color: 0x00f2fe, transparent: true, opacity: 0.8, depthWrite: false, fog: false
+        });
+        const bracketBgMat = new THREE.MeshBasicMaterial({
+            color: 0x003344, transparent: true, opacity: 0.4, depthWrite: false, fog: false
+        });
+
+        // Build a pair of bracket arcs (left = negative X, right = positive X)
+        for (const side of [-1, 1]) {
+            // Background track arc
+            const bgArc = new THREE.Mesh(
+                new THREE.TorusGeometry(2.5, 0.06, 4, 24, Math.PI * 0.75),
+                bracketBgMat.clone()
+            );
+            bgArc.position.set(side * 2.5, 2.5, 0);
+            bgArc.rotation.z = side === -1 ? -(Math.PI * 0.125) : (Math.PI + Math.PI * 0.125);
+            this.boostBrackets.add(bgArc);
+
+            // Fill torus (clones will be scaled on Y to simulate draining)
+            const fillArc = new THREE.Mesh(
+                new THREE.TorusGeometry(2.5, 0.07, 4, 24, Math.PI * 0.75),
+                bracketMat.clone()
+            );
+            fillArc.position.set(side * 2.5, 2.5, 0);
+            fillArc.rotation.z = side === -1 ? -(Math.PI * 0.125) : (Math.PI + Math.PI * 0.125);
+            fillArc.userData.isFill = true;
+            fillArc.userData.side = side;
+            fillArc.userData.baseMat = bracketMat;
+            this.boostBrackets.add(fillArc);
+        }
+
+        this.boostBrackets.position.set(0, 0, 0);
+        this.mesh.add(this.boostBrackets);
     }
 
     update(inputManager, dt) {
         if (this.shieldWireLOD) this.shieldWireLOD.update(this.camera);
-        // Move Input Processing
-        const moveDir = new THREE.Vector3();
-
-        // Use camera's forward/right vectors for WASD movement
-        const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion);
-        forward.y = 0;
-        forward.normalize();
-
-        const right = new THREE.Vector3(1, 0, 0).applyQuaternion(this.camera.quaternion);
-        right.y = 0;
-        right.normalize();
-
-        if (inputManager.keys['w']) moveDir.add(forward);
-        if (inputManager.keys['s']) moveDir.sub(forward);
-        if (inputManager.keys['a']) moveDir.sub(right);
-        if (inputManager.keys['d']) moveDir.add(right);
-
-        if (moveDir.lengthSq() > 0) {
-            moveDir.normalize();
-            this.body.velocity.x = moveDir.x * this.speed;
-            this.body.velocity.z = moveDir.z * this.speed;
-
-            // Smoothly rotate mecha to face movement direction
-            const angle = Math.atan2(moveDir.x, moveDir.z);
-            const targetQuat = new CANNON.Quaternion();
-            targetQuat.setFromAxisAngle(new CANNON.Vec3(0, 1, 0), angle);
-            this.body.quaternion.slerp(targetQuat, 0.15, this.body.quaternion);
+        // ── Flight Mode: override gravity and apply 3D movement ───────────────
+        if (this.flightActive) {
+            this._updateFlight(inputManager, dt);
         } else {
-            // Apply friction manually if not moving
-            this.body.velocity.x *= 0.8;
-            this.body.velocity.z *= 0.8;
-        }
+            // ── Ground Movement ───────────────────────────────────────────────
+            const moveDir = new THREE.Vector3();
 
-        // Jump
-        if (inputManager.keys[' '] && this.canJump) {
-            this.body.velocity.y = 10;
-            this.canJump = false;
+            // Use camera's forward/right vectors for WASD movement
+            const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion);
+            forward.y = 0;
+            forward.normalize();
+
+            const right = new THREE.Vector3(1, 0, 0).applyQuaternion(this.camera.quaternion);
+            right.y = 0;
+            right.normalize();
+
+            if (inputManager.keys['w']) moveDir.add(forward);
+            if (inputManager.keys['s']) moveDir.sub(forward);
+            if (inputManager.keys['a']) moveDir.sub(right);
+            if (inputManager.keys['d']) moveDir.add(right);
+
+            if (moveDir.lengthSq() > 0) {
+                moveDir.normalize();
+                this.body.velocity.x = moveDir.x * this.speed;
+                this.body.velocity.z = moveDir.z * this.speed;
+
+                // Smoothly rotate mecha to face movement direction
+                const angle = Math.atan2(moveDir.x, moveDir.z);
+                const targetQuat = new CANNON.Quaternion();
+                targetQuat.setFromAxisAngle(new CANNON.Vec3(0, 1, 0), angle);
+                this.body.quaternion.slerp(targetQuat, 0.15, this.body.quaternion);
+            } else {
+                // Apply friction manually if not moving
+                this.body.velocity.x *= 0.8;
+                this.body.velocity.z *= 0.8;
+            }
+
+            // Jump
+            if (inputManager.keys[' '] && this.canJump) {
+                this.body.velocity.y = 10;
+                this.canJump = false;
+            }
         }
 
         // Aiming mode (right-click held): snap mecha to face camera forward (COD-style)
@@ -378,6 +491,134 @@ export class MechaController {
             }
         }
     } // <-- closing brace for update()
+
+    /**
+     * Flight Mode physics tick. Called each frame when flightActive === true.
+     * WASD (3D camera-relative), Numpad8/2 (altitude), Numpad4/6 (yaw),
+     * Left Shift (speed boost in exact camera forward direction).
+     */
+    _updateFlight(inputManager, dt) {
+        const FLIGHT_SPEED = 12.0;    // normal cruise units/sec
+        const BOOST_SPEED = 55.0;    // full boost units/sec
+        const VERTICAL_SPEED = 8.0;     // numpad up/down units/sec
+        const YAW_SPEED = 1.8;     // rad/sec for numpad yaw
+        const DAMPING = 0.88;    // per-frame velocity bleed
+
+        // -- Kill gravity: apply inverse gravitational force every tick ---------
+        const grav = this.physicsWorld.world.gravity;
+        this.body.applyForce(
+            new CANNON.Vec3(-grav.x * this.body.mass, -grav.y * this.body.mass, -grav.z * this.body.mass),
+            new CANNON.Vec3(0, 0, 0)
+        );
+
+        // -- Mouse -> mecha yaw: mecha always faces where camera looks ----------
+        const camFwd3D = new THREE.Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion);
+        const yawAngle = Math.atan2(camFwd3D.x, camFwd3D.z);
+        const targetFacingQuat = new CANNON.Quaternion();
+        targetFacingQuat.setFromAxisAngle(new CANNON.Vec3(0, 1, 0), yawAngle);
+        this.body.quaternion.slerp(targetFacingQuat, 0.12, this.body.quaternion);
+
+        // -- Boost logic -------------------------------------------------------
+        const isBoostKey = !!(inputManager.actions?.['flightBoost']);
+        const canBoost = !this.isBoostDepleted && isBoostKey && this.boostEnergy > 0;
+
+        if (canBoost) {
+            this.boostEnergy = Math.max(0, this.boostEnergy - dt);
+            if (this.boostEnergy <= 0) this.isBoostDepleted = true;
+        } else {
+            // Regen only when NOT holding boost OR when fully depleted (must wait for full)
+            if (!isBoostKey || this.isBoostDepleted) {
+                this.boostEnergy = Math.min(this.boostEnergyMax, this.boostEnergy + this.boostRegenRate * dt);
+                if (this.boostEnergy >= this.boostEnergyMax) this.isBoostDepleted = false;
+            }
+        }
+
+        // -- Build target velocity vector -------------------------------------
+        const moveVel = new THREE.Vector3();
+
+        if (canBoost) {
+            // Boost: exact 3D camera forward (includes vertical pitch)
+            const boostDir = new THREE.Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion).normalize();
+            moveVel.copy(boostDir).multiplyScalar(BOOST_SPEED);
+        } else {
+            const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion).normalize();
+            const rgt = new THREE.Vector3(1, 0, 0).applyQuaternion(this.camera.quaternion).normalize();
+
+            if (inputManager.keys['w']) moveVel.addScaledVector(fwd, FLIGHT_SPEED);
+            if (inputManager.keys['s']) moveVel.addScaledVector(fwd, -FLIGHT_SPEED);
+            if (inputManager.keys['a']) moveVel.addScaledVector(rgt, -FLIGHT_SPEED);
+            if (inputManager.keys['d']) moveVel.addScaledVector(rgt, FLIGHT_SPEED);
+
+            const isUp = !!(inputManager.actions?.['flightUp']);
+            const isDown = !!(inputManager.actions?.['flightDown']);
+            if (isUp) moveVel.y += VERTICAL_SPEED;
+            if (isDown) moveVel.y -= VERTICAL_SPEED;
+        }
+
+        // Apply or damp
+        if (moveVel.lengthSq() > 0) {
+            this.body.velocity.x = moveVel.x;
+            this.body.velocity.z = moveVel.z;
+            this.body.velocity.y = moveVel.y !== 0 ? moveVel.y : this.body.velocity.y * DAMPING;
+        } else {
+            this.body.velocity.x *= DAMPING;
+            this.body.velocity.y *= DAMPING;
+            this.body.velocity.z *= DAMPING;
+        }
+
+        // -- Altitude ring: stays level in world space -------------------------
+        this.altitudeRing.rotation.set(0, 0, 0);
+        const vy = this.body.velocity.y;
+        this.altNeedle.rotation.x = THREE.MathUtils.clamp(vy * 0.08, -0.6, 0.6);
+
+        // -- Boost bracket fill visual ----------------------------------------
+        const boostFrac = this.boostEnergy / this.boostEnergyMax;
+        this.boostBrackets.traverse((child) => {
+            if (child.isMesh && child.userData.isFill) {
+                if (this.isBoostDepleted) {
+                    child.material.color.setHex(0xff2020);
+                    child.material.opacity = 0.4 + 0.3 * Math.abs(Math.sin(performance.now() * 0.008));
+                } else {
+                    child.material.color.setHex(canBoost ? 0xffffff : 0x00f2fe);
+                    child.material.opacity = 0.3 + boostFrac * 0.6;
+                }
+            }
+        });
+
+        // -- HUD DOM readouts ------------------------------------------------
+        const altEl = document.getElementById('flight-altitude');
+        const spdEl = document.getElementById('flight-speed');
+        if (altEl) altEl.textContent = this.body.position.y.toFixed(1);
+        if (spdEl) {
+            const spd3D = Math.sqrt(
+                this.body.velocity.x ** 2 +
+                this.body.velocity.y ** 2 +
+                this.body.velocity.z ** 2
+            );
+            spdEl.textContent = spd3D.toFixed(1);
+        }
+    }
+
+    /**
+     * Toggle Flight Mode on/off.
+     * Shows/hides the Iron Man ring, boost brackets, and flight HUD.
+     */
+    toggleFlight() {
+        this.flightActive = !this.flightActive;
+
+        // On enter: kill momentum for a clean hover
+        // On exit: kill velocity so mecha doesn't rocket away when re-landing
+        this.body.velocity.set(0, 0, 0);
+        this.body.angularVelocity.set(0, 0, 0);
+
+        // 3D overlays visible only in flight
+        this.altitudeRing.visible = this.flightActive;
+        this.boostBrackets.visible = this.flightActive;
+
+        // HUD panel
+        const flightHud = document.getElementById('flight-hud');
+        if (flightHud) flightHud.classList.toggle('hidden', !this.flightActive);
+    }
 
     shoot(fireMode = 1) {
         if (this.isShieldDeployed) {

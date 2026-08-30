@@ -201,7 +201,21 @@
                                 <th class="col-custom">Custom Bind</th>
                             </tr>
                         </thead>
-                        <tbody id="kb-freeroam-rows"></tbody>
+                        <tbody id="kb-freeRoam-rows"></tbody>
+                    </table>
+                </div>
+
+                <div class="settings-section">
+                    <div class="settings-section-header">✈ Flight Mode</div>
+                    <table class="keybind-table">
+                        <thead>
+                            <tr>
+                                <th class="col-action">Action</th>
+                                <th class="col-default">Default Key</th>
+                                <th class="col-custom">Custom Bind</th>
+                            </tr>
+                        </thead>
+                        <tbody id="kb-flight-rows"></tbody>
                     </table>
                 </div>
 
@@ -333,6 +347,23 @@
             <div class="meter-track">
                 <div class="meter-fill" style="width:100%"></div>
             </div>
+        </div>
+    </div>
+
+    <!-- Flight Mode HUD (bottom-left, only visible in flight) -->
+    <div id="flight-hud" class="hidden">
+        <div class="flight-hud-row">
+            <span class="flight-hud-label">ALT</span>
+            <span class="flight-hud-value" id="flight-altitude">0.0</span>
+            <span class="flight-hud-unit">m</span>
+        </div>
+        <div class="flight-hud-row">
+            <span class="flight-hud-label">SPD</span>
+            <span class="flight-hud-value" id="flight-speed">0.0</span>
+            <span class="flight-hud-unit">m/s</span>
+        </div>
+        <div class="flight-hud-row flight-hud-mode">
+            <span id="flight-mode-label">✈ FLIGHT MODE</span>
         </div>
     </div>
 

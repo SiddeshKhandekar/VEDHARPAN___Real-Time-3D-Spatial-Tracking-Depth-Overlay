@@ -233,6 +233,14 @@ class DioramaScene {
                 return;
             }
 
+            // Flight Mode Toggle
+            if (action === 'toggleFlight' || (!action && e.key.toLowerCase() === 'f')) {
+                if (this.mechaController) {
+                    this.mechaController.toggleFlight();
+                }
+                return;
+            }
+
             // ESC / Menu Toggle
             if (isEscape) {
                 const settingsPanel = document.getElementById('settings-panel');
@@ -581,7 +589,8 @@ class DioramaScene {
             'kb-movement-rows': ['moveForward', 'moveBackward', 'moveLeft', 'moveRight', 'jump'],
             'kb-combat-rows': ['fireMode1', 'fireMode2', 'fireMode3', 'fireMode4', 'toggleShield', 'holdShield'],
             'kb-system-rows': ['toggleCamera', 'togglePhysicsCloak', 'respawn', 'openMenu'],
-            'kb-freeroam-rows': ['frForward', 'frBackward', 'frLeft', 'frRight', 'frRotLeft', 'frRotRight', 'frUp', 'frDown', 'frFlight', 'frRecenter'],
+            'kb-freeRoam-rows': ['frForward', 'frBackward', 'frLeft', 'frRight', 'frRotLeft', 'frRotRight', 'frUp', 'frDown', 'frFlight', 'frRecenter'],
+            'kb-flight-rows': ['toggleFlight', 'flightUp', 'flightDown', 'flightTurnLeft', 'flightTurnRight', 'flightBoost'],
         };
 
         for (const [tbodyId, actionIds] of Object.entries(groups)) {
