@@ -116,9 +116,9 @@ class DioramaScene {
             powerPreference: "high-performance"
         });
         this.renderer.setSize(window.innerWidth, window.innerHeight);
-        this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        this.renderer.setPixelRatio(1); // PERF: Cap at 1x — halves shaded fragments on HiDPI
         this.renderer.shadowMap.enabled = true;
-        this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        this.renderer.shadowMap.type = THREE.PCFShadowMap; // PERF: PCF is ~30% faster than PCFSoft
         this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
         this.renderer.toneMappingExposure = 1.2;
 
@@ -160,6 +160,11 @@ class DioramaScene {
 
         // 9. Event Listeners
         window.addEventListener('resize', () => this.onWindowResize());
+        window.addEventListener('flightYawDelta', (e) => {
+            if (this.cameraMode === 1 || this.cameraMode === 2 || this.cameraMode === 3) {
+                this.orbitYaw += e.detail.delta;
+            }
+        });
 
 
         // Main Menu Buttons
@@ -230,6 +235,14 @@ class DioramaScene {
             // Physics Cloak Debugger
             if (action === 'togglePhysicsCloak' || (!action && e.key === '`')) {
                 this.togglePhysicsCloak();
+                return;
+            }
+
+            // Flight Mode Toggle
+            if (action === 'toggleFlight' || (!action && e.key.toLowerCase() === 'f')) {
+                if (this.mechaController) {
+                    this.mechaController.toggleFlight();
+                }
                 return;
             }
 
@@ -581,7 +594,8 @@ class DioramaScene {
             'kb-movement-rows': ['moveForward', 'moveBackward', 'moveLeft', 'moveRight', 'jump'],
             'kb-combat-rows': ['fireMode1', 'fireMode2', 'fireMode3', 'fireMode4', 'toggleShield', 'holdShield'],
             'kb-system-rows': ['toggleCamera', 'togglePhysicsCloak', 'respawn', 'openMenu'],
-            'kb-freeroam-rows': ['frForward', 'frBackward', 'frLeft', 'frRight', 'frRotLeft', 'frRotRight', 'frUp', 'frDown', 'frFlight', 'frRecenter'],
+            'kb-freeRoam-rows': ['frForward', 'frBackward', 'frLeft', 'frRight', 'frRotLeft', 'frRotRight', 'frUp', 'frDown', 'frFlight', 'frRecenter'],
+            'kb-flight-rows': ['toggleFlight', 'flightUp', 'flightDown', 'flightTurnLeft', 'flightTurnRight', 'flightBoost'],
         };
 
         for (const [tbodyId, actionIds] of Object.entries(groups)) {
@@ -696,8 +710,8 @@ class DioramaScene {
         this.dirLight.castShadow = true;
 
         // Shadow frustum sized to cover the whole room interior
-        this.dirLight.shadow.mapSize.width = 4096;
-        this.dirLight.shadow.mapSize.height = 4096;
+        this.dirLight.shadow.mapSize.width = 2048;  // PERF: 2048 is visually identical at this camera distance
+        this.dirLight.shadow.mapSize.height = 2048;
         this.dirLight.shadow.camera.near = 0.5;
         this.dirLight.shadow.camera.far = 30;
         this.dirLight.shadow.camera.left = -10;
@@ -912,6 +926,9 @@ class DioramaScene {
                             this.effects,
                             (pos, dir, mode) => this.spawnProjectile(pos, dir, mode)
                         );
+
+                        // Attach engine plume particles (uses the same loader, no extra cost)
+                        this.mechaController.loadPlumes(loader);
                     },
                     undefined,
                     (error) => console.error('Error loading Mecha Model:', error)
@@ -1025,12 +1042,13 @@ class DioramaScene {
                     tireClone.rotation.z = Math.random() * Math.PI * 2;
 
                     tireClone.scale.set(0.4, 0.4, 0.4);
-                    configureShadows(tireClone, true, true);
+                    configureShadows(tireClone, false, false); // PERF: void objects — no visible shadows
                     this.scene.add(tireClone);
 
                     tireClone.traverse((child) => {
                         if (child.isMesh) {
                             this.collidableMeshes.push(child);
+                            if (child.material) child.material.fog = false; // PERF: deep void — fog is wasted
                         }
                     });
 
@@ -1080,17 +1098,15 @@ class DioramaScene {
                 const pScale = 1.5 / pWidth;
                 porscheClone.scale.set(pScale, pScale, pScale);
 
-                // 3. Add Bright White Edge Detail Identifier
+                // 3. Register meshes for physics cloak (EdgesGeometry removed — too expensive per-mesh)
                 porscheClone.traverse((child) => {
                     if (child.isMesh) {
                         this.collidableMeshes.push(child);
-                        const edges = new THREE.EdgesGeometry(child.geometry, 15);
-                        const line = new THREE.LineSegments(edges, new THREE.LineBasicMaterial({ color: 0xffffff, linewidth: 2.0 }));
-                        child.add(line);
+                        if (child.material) child.material.fog = false;
                     }
                 });
 
-                configureShadows(porscheClone, true, true);
+                configureShadows(porscheClone, false, false); // PERF: void object — no visible shadows
                 this.scene.add(porscheClone);
 
                 // Map reference for manual centripetal orbital pull!
@@ -1153,7 +1169,7 @@ class DioramaScene {
                         }
                     });
 
-                    configureShadows(astClone, true, true);
+                    configureShadows(astClone, false, false); // PERF: void objects — shadows never visible
                     this.scene.add(astClone);
 
                     // Bind it strictly to the Cannon engine mapping its exact mesh limits to a bounding sphere for physics
@@ -1636,14 +1652,17 @@ class DioramaScene {
                 this.freeRoamOffset.add(trueForward.multiplyScalar(flightSpeed));
             }
 
-            if (acts['frForward']) this.freeRoamOffset.add(forward.clone().multiplyScalar(moveSpeed));
-            if (acts['frBackward']) this.freeRoamOffset.sub(forward.clone().multiplyScalar(moveSpeed));
+            // frForward/frBackward share numpad8/2 keys with flightUp/flightDown.
+            // Read both action names so numpad works in both Free Roam and Flight.
+            if (acts['frForward'] || acts['flightUp']) this.freeRoamOffset.add(forward.clone().multiplyScalar(moveSpeed));
+            if (acts['frBackward'] || acts['flightDown']) this.freeRoamOffset.sub(forward.clone().multiplyScalar(moveSpeed));
             if (acts['frLeft']) this.freeRoamOffset.sub(right.clone().multiplyScalar(moveSpeed));
             if (acts['frRight']) this.freeRoamOffset.add(right.clone().multiplyScalar(moveSpeed));
 
             const rotSpeed = 2.0 * (dt || 1 / 60);
-            if (acts['frRotLeft']) this.orbitYaw += rotSpeed;
-            if (acts['frRotRight']) this.orbitYaw -= rotSpeed;
+            // frRotLeft/frRotRight share numpad4/6 with flightTurnLeft/flightTurnRight.
+            if (acts['frRotLeft'] || acts['flightTurnLeft']) this.orbitYaw += rotSpeed;
+            if (acts['frRotRight'] || acts['flightTurnRight']) this.orbitYaw -= rotSpeed;
 
             if (acts['frUp']) this.freeRoamOffset.y += moveSpeed;
             if (acts['frDown']) this.freeRoamOffset.y -= moveSpeed;
@@ -1848,7 +1867,7 @@ class DioramaScene {
         if (this.isPhysicsCloakActive) {
             this.renderer.setPixelRatio(1);
         } else {
-            this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+            this.renderer.setPixelRatio(1);
         }
     }
 
@@ -2001,7 +2020,7 @@ class DioramaScene {
                     let targetCamPos = mechaPos.clone().add(offset);
                     const centerPoint = mechaPos.clone().add(new THREE.Vector3(0, 4.35, 0));
                     targetCamPos = this._applyCameraCollision(centerPoint, targetCamPos);
-                    this.camera.position.lerp(targetCamPos, 0.12);
+                    this.camera.position.lerp(targetCamPos, Math.min(1.0, dt * 8.0));
                     this.camera.lookAt(mechaPos.clone().add(new THREE.Vector3(0, 3.85, 0)));
                     this.camera.clearViewOffset();
                 }
@@ -2074,7 +2093,7 @@ class DioramaScene {
                 this.inputManager.keys['d'] = false;
                 this.inputManager.isShooting = false;
             }
-            this.mechaController.update(this.inputManager, dt);
+            this.mechaController.update(this.inputManager, dt, this.cameraMode);
         }
         if (this.effects) this.effects.update(dt);
 

@@ -403,3 +403,79 @@ html {
         opacity: 1.0;
     }
 }
+
+/* ── Flight Mode HUD ──────────────────────────────── */
+#flight-hud {
+    position: absolute;
+    bottom: 90px;
+    left: 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    background: rgba(0, 0, 0, 0.55);
+    border: 1px solid rgba(0, 242, 254, 0.35);
+    border-radius: 10px;
+    padding: 12px 18px;
+    backdrop-filter: blur(10px);
+    z-index: 10;
+    pointer-events: none;
+    user-select: none;
+    box-shadow: 0 0 20px rgba(0, 242, 254, 0.15), inset 0 0 20px rgba(0, 242, 254, 0.04);
+    min-width: 140px;
+}
+
+.flight-hud-row {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+}
+
+.flight-hud-label {
+    font-family: 'Orbitron', monospace;
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 2px;
+    color: rgba(0, 242, 254, 0.6);
+    text-transform: uppercase;
+    width: 28px;
+}
+
+.flight-hud-value {
+    font-family: 'Orbitron', monospace;
+    font-size: 20px;
+    font-weight: 700;
+    color: #00f2fe;
+    text-shadow: 0 0 12px rgba(0, 242, 254, 0.7);
+    letter-spacing: 1px;
+    min-width: 55px;
+    text-align: right;
+}
+
+.flight-hud-unit {
+    font-family: 'Orbitron', monospace;
+    font-size: 9px;
+    color: rgba(0, 242, 254, 0.45);
+    letter-spacing: 1px;
+}
+
+.flight-hud-mode {
+    margin-top: 4px;
+    border-top: 1px solid rgba(0, 242, 254, 0.15);
+    padding-top: 6px;
+    justify-content: center;
+}
+
+.flight-hud-mode span {
+    font-family: 'Orbitron', monospace;
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 3px;
+    color: #00f2fe;
+    text-shadow: 0 0 10px rgba(0, 242, 254, 0.8);
+    animation: flight-mode-pulse 2s ease-in-out infinite;
+}
+
+@keyframes flight-mode-pulse {
+    0%, 100% { opacity: 0.7; }
+    50% { opacity: 1.0; text-shadow: 0 0 18px rgba(0, 242, 254, 1.0); }
+}
