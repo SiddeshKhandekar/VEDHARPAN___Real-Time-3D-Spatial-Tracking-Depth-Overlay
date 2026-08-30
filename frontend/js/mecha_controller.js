@@ -227,39 +227,42 @@ export class MechaController {
             color: 0x003344, transparent: true, opacity: 0.4, depthWrite: false, fog: false
         });
 
-        // Build a pair of bracket arcs (left = negative X, right = positive X)
-        // Each arc is oriented via rotation.y = Math.PI/2 so the torus sweeps in the YZ-plane
-        // and appears as a vertical ( ) parenthesis shape when seen from the camera.
-        const BRACKET_X = 6.0;          // units from mecha centre-line
-        const BRACKET_Y = 2.5;          // torso height offset
-        const TORUS_R = 2.2;          // arc circle radius
-        const TORUS_TUBE = 0.07;         // tube thickness
-        const ARC_ANGLE = Math.PI * 0.75; // 135° arc — the open gap faces outward
+        // Build a pair of symmetric bracket arcs around a common center
+        // This forms a perfect ( ) parenthesis HUD framing the mecha.
+        const BRACKET_Y = 2.5;          // Realigned to perfectly match altitudeRing center
+        const TORUS_R = 3.5;            // shared orbital radius
+        const TORUS_TUBE = 0.05;        // tube thickness
+        const ARC_ANGLE = Math.PI * 0.75; // 135° arc length
 
-        for (const side of [-1, 1]) {
-            // rotZ: rotate the arc so the gap faces outward (away from mecha).
-            // Left bracket: gap faces left  → rotZ = -Math.PI * 0.125
-            // Right bracket: gap faces right → rotZ =  Math.PI * 0.875 (= PI + PI*-0.125 flipped)
-            const rotZ = side === -1 ? -Math.PI * 0.125 : Math.PI * 0.875;
+        // Natively, a TorusGeometry sweeps from 0 to ARC_ANGLE.
+        // Its midpoint is at ARC_ANGLE / 2 (67.5 degrees).
+        // Right bracket center should be at 0 degrees. (Rotate by -67.5 deg)
+        // Left bracket center should be at 180 degrees. (Rotate by 112.5 deg)
+        const rotOffsets = [
+            -Math.PI * 0.375,  // Right Bracket
+            Math.PI * 0.625    // Left Bracket
+        ];
+
+        for (let i = 0; i < 2; i++) {
+            const rotZ = rotOffsets[i];
 
             // Background track arc
             const bgArc = new THREE.Mesh(
                 new THREE.TorusGeometry(TORUS_R, TORUS_TUBE, 4, 32, ARC_ANGLE),
                 bracketBgMat.clone()
             );
-            bgArc.position.set(side * BRACKET_X, BRACKET_Y, 0);
-            bgArc.rotation.set(0, Math.PI / 2, rotZ); // y-rotation makes arc face camera
+            bgArc.position.set(0, BRACKET_Y, 0);
+            bgArc.rotation.set(0, 0, rotZ); // Flush with camera XY plane
             this.boostBrackets.add(bgArc);
 
             // Fill torus
             const fillArc = new THREE.Mesh(
-                new THREE.TorusGeometry(TORUS_R, TORUS_TUBE + 0.01, 4, 32, ARC_ANGLE),
+                new THREE.TorusGeometry(TORUS_R, TORUS_TUBE + 0.015, 4, 32, ARC_ANGLE),
                 bracketMat.clone()
             );
-            fillArc.position.set(side * BRACKET_X, BRACKET_Y, 0);
-            fillArc.rotation.set(0, Math.PI / 2, rotZ);
+            fillArc.position.set(0, BRACKET_Y, 0);
+            fillArc.rotation.set(0, 0, rotZ);
             fillArc.userData.isFill = true;
-            fillArc.userData.side = side;
             this.boostBrackets.add(fillArc);
         }
 
@@ -648,10 +651,10 @@ export class MechaController {
             if (child.isMesh && child.userData.isFill) {
                 if (this.isBoostDepleted) {
                     child.material.color.setHex(0xff2020);
-                    child.material.opacity = 0.4 + 0.3 * Math.abs(Math.sin(performance.now() * 0.008));
+                    child.material.opacity = 0.2 + 0.2 * Math.abs(Math.sin(performance.now() * 0.008));
                 } else {
                     child.material.color.setHex(canBoost ? 0xffffff : 0x00f2fe);
-                    child.material.opacity = 0.3 + boostFrac * 0.6;
+                    child.material.opacity = 0.15 + boostFrac * 0.35; // Lower max opacity for cleaner UI
                 }
             }
         });
