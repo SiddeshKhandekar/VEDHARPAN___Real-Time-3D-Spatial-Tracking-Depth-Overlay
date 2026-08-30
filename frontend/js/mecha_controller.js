@@ -173,13 +173,19 @@ export class MechaController {
 
         // Tick marks every 10 degrees around the outer ring
         const tickMat = new THREE.MeshBasicMaterial({ color: 0x00f2fe, transparent: true, opacity: 0.22, depthWrite: false, fog: false });
+        this.boostTickMat = new THREE.MeshBasicMaterial({ color: 0x00f2fe, transparent: true, opacity: 0.4, depthWrite: false, fog: false });
+
         for (let i = 0; i < 36; i++) {
             const angle = (i / 36) * Math.PI * 2;
             const isMajor = i % 9 === 0;
             const tickLen = isMajor ? 0.35 : 0.18;
+
+            // The 7 ticks perfectly centered at the front (Z > 0), 3 on each side
+            const isFrontBoostTick = (i <= 3 || i >= 33);
+
             const tick = new THREE.Mesh(
                 new THREE.BoxGeometry(0.03, tickLen, 0.03),
-                tickMat
+                isFrontBoostTick ? this.boostTickMat : tickMat
             );
             tick.position.set(Math.sin(angle) * 3.2, 0, Math.cos(angle) * 3.2);
             tick.lookAt(0, 0, 0);
@@ -620,8 +626,24 @@ export class MechaController {
         const vy = this.body.velocity.y;
         this.altNeedle.rotation.x = THREE.MathUtils.clamp(vy * 0.08, -0.6, 0.6);
 
-        // -- Boost bracket fill visual ----------------------------------------
+        // -- Boost indicator visual ----------------------------------------
         const boostFrac = this.boostEnergy / this.boostEnergyMax;
+
+        // Sync the front 6 ticks of the First Person HUD
+        if (this.boostTickMat) {
+            if (this.isBoostDepleted) {
+                this.boostTickMat.color.setHex(0xff2020);
+                this.boostTickMat.opacity = 0.4 + 0.6 * Math.abs(Math.sin(performance.now() * 0.008));
+            } else if (canBoost) {
+                this.boostTickMat.color.setHex(0xc000ff);
+                this.boostTickMat.opacity = 1.0;
+            } else {
+                this.boostTickMat.color.setHex(0x00f2fe);
+                this.boostTickMat.opacity = 0.4;
+            }
+        }
+
+        // Sync outer boost brackets
         this.boostBrackets.traverse((child) => {
             if (child.isMesh && child.userData.isFill) {
                 if (this.isBoostDepleted) {

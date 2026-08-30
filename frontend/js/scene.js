@@ -161,7 +161,7 @@ class DioramaScene {
         // 9. Event Listeners
         window.addEventListener('resize', () => this.onWindowResize());
         window.addEventListener('flightYawDelta', (e) => {
-            if (this.cameraMode === 1 || this.cameraMode === 3) {
+            if (this.cameraMode === 1 || this.cameraMode === 2 || this.cameraMode === 3) {
                 this.orbitYaw += e.detail.delta;
             }
         });
