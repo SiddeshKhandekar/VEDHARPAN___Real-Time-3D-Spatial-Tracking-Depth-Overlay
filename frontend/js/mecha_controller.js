@@ -633,11 +633,15 @@ export class MechaController {
         // -- Boost indicator visual ----------------------------------------
         const boostFrac = this.boostEnergy / this.boostEnergyMax;
 
+        // Convert raw performance.now() to a discrete accumulated phase tracked exactly by delta time.
+        // This makes the blink perfectly smooth and completely immune to frame-rate dips or JS timing stutter.
+        this._blinkPhase = (this._blinkPhase || 0) + dt * 8.0;
+
         // Sync the front 6 ticks of the First Person HUD
         if (this.boostTickMat) {
             if (this.isBoostDepleted) {
                 this.boostTickMat.color.setHex(0xff2020);
-                this.boostTickMat.opacity = 0.4 + 0.6 * Math.abs(Math.sin(performance.now() * 0.008));
+                this.boostTickMat.opacity = 0.4 + 0.6 * Math.abs(Math.sin(this._blinkPhase));
             } else if (canBoost) {
                 this.boostTickMat.color.setHex(0xc000ff);
                 this.boostTickMat.opacity = 1.0;
@@ -652,7 +656,7 @@ export class MechaController {
             if (child.isMesh && child.userData.isFill) {
                 if (this.isBoostDepleted) {
                     child.material.color.setHex(0xff2020);
-                    child.material.opacity = 0.2 + 0.2 * Math.abs(Math.sin(performance.now() * 0.008));
+                    child.material.opacity = 0.2 + 0.2 * Math.abs(Math.sin(this._blinkPhase));
                 } else {
                     child.material.color.setHex(canBoost ? 0xffffff : 0x00f2fe);
                     child.material.opacity = 0.15 + boostFrac * 0.35; // Lower max opacity for cleaner UI

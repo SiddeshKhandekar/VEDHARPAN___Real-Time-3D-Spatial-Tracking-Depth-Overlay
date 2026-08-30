@@ -163,6 +163,7 @@ class DioramaScene {
         window.addEventListener('flightYawDelta', (e) => {
             if (this.cameraMode === 1 || this.cameraMode === 2 || this.cameraMode === 3) {
                 this.orbitYaw += e.detail.delta;
+                this._flightYawThisFrame = true; // Flag to ignore simultaneous raw mouse movement
             }
         });
 
@@ -328,6 +329,15 @@ class DioramaScene {
         });
 
         this.renderer.domElement.addEventListener('mousemove', (e) => {
+            // BUG 2 FIX: Ensure pointer lock is strictly active to prevent corrupted unbounded mouse coordinates
+            if (this.cameraMode !== 0 && document.pointerLockElement !== this.renderer.domElement) return;
+            // Free Roam constraint: only move if actually clicking and dragging
+            if (this.cameraMode === 0 && !this.isDragging) return;
+
+            // BUG 1 FIX: If the flight system manually synced the camera yaw this precise frame, ignore the mouse delta
+            // to completely prevent the camera from aggressively snapping back at the end of a boost phase.
+            if (this._flightYawThisFrame) return;
+
             const sensitivity = 0.003 * (this.settingsManager.graphics.sensitivity || 1.0);
             // Invert Y-axis multiplier from settings
             const pitchDir = this.settingsManager.graphics.invertMouse ? 1 : -1;
@@ -818,6 +828,8 @@ class DioramaScene {
                 // This eliminates the savage lag spike when heavy Asteroid/Room geometry suddenly impacts the frustum natively!
                 try {
                     this.renderer.compile(this.scene, this.camera);
+                    // Force a raw native render block immediately behind the black screen, which forces all physical VRAM texture buffers to fully populate!
+                    this.renderer.render(this.scene, this.camera);
                 } catch (e) {
                     console.warn("GPU compilation hook suppressed:", e);
                 }
@@ -2064,6 +2076,9 @@ class DioramaScene {
                 }
                 break;
         }
+
+        // Reset the flight camera intercept flag at the start of the next structural evaluation frame
+        this._flightYawThisFrame = false;
 
         // 2. Adjust dynamic shadow physics occluder positions
         this.applyShadowOcclusion();
