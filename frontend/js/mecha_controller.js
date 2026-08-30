@@ -644,6 +644,9 @@ export class MechaController {
             spdEl.textContent = spd3D.toFixed(1);
         }
 
+        // -- Engine plume visuals ----------------------------------------------
+        this._updatePlumes(inputManager, dt, cameraMode);
+
         // -- Flight shooting: left-click fires along 3D camera forward, no aim required ----
         // For rapid fire (mode 2), check mouseState.left; for single fire, use isShooting.
         const isFiring = inputManager.isShooting ||
@@ -738,5 +741,109 @@ export class MechaController {
 
         this.muzzleFlash.triggerMuzzleFlash(barrelPos, fireMode);
         this.createProjectile(barrelPos, shootDir, fireMode);
+    }
+
+    /**
+     * Load engine plume GLB and instantiate 5 named emitter slots,
+     * parented to the mecha wrapper. Call once after construction.
+     */
+    loadPlumes(loader) {
+        const SLOTS = [
+            { name: 'shoulderL', pos: [-0.55, 3.55, 0.10], rot: [-0.35, 0, 0.25], scale: 0.38 },
+            { name: 'shoulderR', pos: [0.55, 3.55, 0.10], rot: [-0.35, 0, -0.25], scale: 0.38 },
+            { name: 'backMain', pos: [0.0, 2.85, 0.55], rot: [-0.55, 0, 0.00], scale: 0.55 },
+            { name: 'sideL', pos: [-0.52, 2.50, 0.48], rot: [-0.45, 0.35, 0.00], scale: 0.42 },
+            { name: 'sideR', pos: [0.52, 2.50, 0.48], rot: [-0.45, -0.35, 0.00], scale: 0.42 },
+        ];
+
+        this.plumes = {};
+        this.plumeReady = false;
+
+        loader.load('assets/simple_engine_plume_test.glb', (gltf) => {
+            const baseScene = gltf.scene;
+            const baseClips = gltf.animations;
+
+            SLOTS.forEach(slot => {
+                const clone = baseScene.clone(true);
+                clone.visible = false;
+
+                // Additive blending so plumes glow on top of the mecha skin
+                clone.traverse(child => {
+                    if (child.isMesh && child.material) {
+                        child.material = child.material.clone();
+                        child.material.blending = THREE.AdditiveBlending;
+                        child.material.depthWrite = false;
+                        child.material.transparent = true;
+                    }
+                });
+
+                const pivot = new THREE.Group();
+                pivot.position.set(...slot.pos);
+                pivot.rotation.set(...slot.rot);
+                pivot.scale.setScalar(slot.scale);
+                pivot.add(clone);
+                this.mesh.add(pivot);
+
+                const mixer = new THREE.AnimationMixer(clone);
+                let action = null;
+                if (baseClips.length > 0) {
+                    action = mixer.clipAction(baseClips[0]);
+                    action.setLoop(THREE.LoopRepeat, Infinity);
+                    action.play();
+                }
+
+                this.plumes[slot.name] = { mesh: clone, pivot, mixer, action, baseScale: slot.scale };
+            });
+
+            this.plumeReady = true;
+            console.log('[Plumes] Engine plume system ready — 5 emitter slots active.');
+        }, undefined, (err) => {
+            console.warn('[Plumes] Failed to load plume GLB:', err);
+        });
+    }
+
+    /**
+     * Drive plume visibility, scale, and vectored-thrust yaw each frame.
+     * Must be called inside _updateFlight() every tick.
+     */
+    _updatePlumes(inputManager, dt, cameraMode) {
+        if (!this.plumeReady) return;
+
+        const active = cameraMode !== 0;
+        const isUp = active && !!(inputManager.actions?.['flightUp']);
+        const isDown = active && !!(inputManager.actions?.['flightDown']);
+        const isLeft = active && !!(inputManager.keys?.['a']);
+        const isRight = active && !!(inputManager.keys?.['d']);
+        const isBoosting = active && !this.isBoostDepleted
+            && !!(inputManager.actions?.['flightBoost'])
+            && this.boostEnergy > 0;
+
+        // Shoulder plumes (Red) — visible only when descending
+        ['shoulderL', 'shoulderR'].forEach(name => {
+            const p = this.plumes[name];
+            p.mesh.visible = isDown;
+            if (isDown) p.mixer.update(dt);
+        });
+
+        // Back main thruster (Yellow) — always on, big when ascending
+        const bp = this.plumes['backMain'];
+        bp.mesh.visible = true;
+        const targetScale = isUp ? bp.baseScale * 2.4 : bp.baseScale * 0.65;
+        const curS = bp.pivot.scale.x;
+        bp.pivot.scale.setScalar(curS + (targetScale - curS) * Math.min(1, dt * 7));
+        // Vectored-thrust yaw: lean opposite to strafe
+        const yawTarget = isLeft ? 0.42 : isRight ? -0.42 : 0.0;
+        bp.pivot.rotation.y += (yawTarget - bp.pivot.rotation.y) * Math.min(1, dt * 8);
+        bp.mixer.update(dt);
+
+        // Side nacelle plumes (Blue) — boost only
+        ['sideL', 'sideR'].forEach(name => {
+            const p = this.plumes[name];
+            p.mesh.visible = isBoosting;
+            if (isBoosting) {
+                p.pivot.scale.setScalar(p.baseScale * 1.55);
+                p.mixer.update(dt);
+            }
+        });
     }
 }

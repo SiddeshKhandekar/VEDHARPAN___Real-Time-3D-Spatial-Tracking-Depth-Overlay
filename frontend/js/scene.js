@@ -926,6 +926,9 @@ class DioramaScene {
                             this.effects,
                             (pos, dir, mode) => this.spawnProjectile(pos, dir, mode)
                         );
+
+                        // Attach engine plume particles (uses the same loader, no extra cost)
+                        this.mechaController.loadPlumes(loader);
                     },
                     undefined,
                     (error) => console.error('Error loading Mecha Model:', error)
