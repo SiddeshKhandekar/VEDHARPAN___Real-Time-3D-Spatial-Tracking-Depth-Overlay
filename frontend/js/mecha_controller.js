@@ -24,6 +24,7 @@ export class MechaController {
         this.body.collisionFilterGroup = 4;
         this.body.collisionFilterMask = 1;
         this.physicsWorld.world.addBody(this.body);
+        this.body.smoothSync = true; // Enable lerp-based mesh sync to eliminate flight jitter
         this.physicsWorld.dynamicBodies.push({ mesh: this.mesh, body: this.body });
 
         this.speed = 4.0;

@@ -143,8 +143,8 @@ export class PhysicsWorld {
 
     step(dt) {
 
-        // Step physics
-        this.world.step(1 / 60, dt, 3);
+        // Step physics — 4 substeps gives more stable flight contacts without spiking CPU
+        this.world.step(1 / 60, dt, 4);
 
         // Sync graphics
         for (let i = this.dynamicBodies.length - 1; i >= 0; i--) {
@@ -158,8 +158,27 @@ export class PhysicsWorld {
                 continue;
             }
 
-            pair.mesh.position.copy(pair.body.position);
-            pair.mesh.quaternion.copy(pair.body.quaternion);
+            if (pair.body.smoothSync) {
+                // Threshold-based sync: snap on large gaps (spawn), lerp for tiny per-frame movements
+                const dist = pair.mesh.position.distanceTo(pair.body.position);
+                if (dist > 1.0) {
+                    // Large distance: snap immediately to avoid invisible-mecha on spawn
+                    pair.mesh.position.copy(pair.body.position);
+                    pair.mesh.quaternion.copy(pair.body.quaternion);
+                } else {
+                    // Small delta: smooth lerp to eliminate flight jitter
+                    const alpha = Math.min(1.0, dt * 25);
+                    pair.mesh.position.lerp(pair.body.position, alpha);
+                    // IMPORTANT: CANNON.Quaternion uses .x/.y/.z/.w (public), but THREE.Quaternion.slerp()
+                    // internally accesses ._x/._y/._z/._w (underscore). Must convert first to avoid NaN.
+                    const bq = pair.body.quaternion;
+                    const tq = new THREE.Quaternion(bq.x, bq.y, bq.z, bq.w);
+                    pair.mesh.quaternion.slerp(tq, alpha);
+                }
+            } else {
+                pair.mesh.position.copy(pair.body.position);
+                pair.mesh.quaternion.copy(pair.body.quaternion);
+            }
         }
     }
 }
