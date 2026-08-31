@@ -53,6 +53,16 @@ export class MechaController {
             this.ammo[m] = { rounds: MAX[m], max: MAX[m], cooldownMs: CD[m], reloadEnd: 0, isReloading: false };
         });
 
+        // ── Missile Lock-On System (Mode 3) ───────────────────────────────────
+        this.lockTarget = null;
+        this.lockTimer = 0.0;
+        this.isLocked = false;
+
+        // Lock UI Elements
+        this.lockUiEl = document.getElementById('lockon-ui');
+        this.lockTextEl = document.getElementById('lockon-text');
+        this.lockBrackets = document.querySelectorAll('.lockon-bracket');
+
         // ── Defensive Shield Feature ──────────────────────────────────────────
         this.shieldEnergyMax = 120.0;
         this.shieldEnergy = this.shieldEnergyMax;
@@ -513,9 +523,156 @@ export class MechaController {
             }
         }
 
+        // -- Missile Lock-On System --
+        this._updateMissileLockOn(inputManager, dt);
+
         // -- Engine plume visuals (always running to process shutdown transitions) --
         this._updatePlumes(inputManager, dt, cameraMode);
     } // <-- closing brace for update()
+
+    /**
+     * Handles 3D crosshair raycasting to acquire target locks for the dual-missile system.
+     */
+    _updateMissileLockOn(inputManager, dt) {
+        if (!this.lockUiEl || !this.lockTextEl) return;
+
+        // Ensure UI is only active when Mode 3 (Missiles) is equipped
+        if (inputManager.fireMode !== 3) {
+            this.lockTarget = null;
+            this.lockTimer = 0.0;
+            this.isLocked = false;
+            this.lockUiEl.classList.add('hidden');
+            this.lockUiEl.classList.remove('locked');
+            return;
+        }
+
+        // Scan purely against physically registered dynamic entities
+        const dynamicMeshes = this.physicsWorld.dynamicBodies.map(b => b.mesh).filter(m => !!m);
+
+        // ------------- DIAGNOSTIC HOOK ------------------
+        let diagEl = document.getElementById('debug-lock-diag');
+        if (!diagEl) {
+            diagEl = document.createElement('div');
+            diagEl.id = 'debug-lock-diag';
+            diagEl.style.position = 'fixed';
+            diagEl.style.top = '10px';
+            diagEl.style.right = '10px';
+            diagEl.style.background = 'rgba(0,0,0,0.8)';
+            diagEl.style.color = '#00ff00';
+            diagEl.style.padding = '10px';
+            diagEl.style.fontFamily = 'monospace';
+            diagEl.style.zIndex = '999999';
+            diagEl.style.pointerEvents = 'none';
+            document.body.appendChild(diagEl);
+        }
+        let debugStr = `Mode: ${inputManager.fireMode} | DynMeshes: ${dynamicMeshes.length}<br>`;
+        // ------------------------------------------------
+
+        let currentTarget = null;
+        let closestDistSq = Infinity;
+        const maxLockRadius = 0.25; // 25% of the screen from the center
+
+        const tempV = new THREE.Vector3();
+
+        for (let mesh of dynamicMeshes) {
+            // Ignore projectiles or self
+            if (mesh.name === 'projectile' || mesh === this.mesh || mesh.parent === this.mesh) continue;
+
+            mesh.getWorldPosition(tempV);
+            tempV.project(this.camera);
+
+            // If it's behind the camera, skip
+            if (tempV.z > 1.0) continue;
+
+            // Calculate distance in normalized screen coordinates from center (0,0)
+            const distSq = tempV.x * tempV.x + tempV.y * tempV.y;
+
+            if (distSq < 15.0) { // log nearby things
+                debugStr += `Obj[${mesh.id}]: dist=${distSq.toFixed(3)} z=${tempV.z.toFixed(2)}<br>`;
+            }
+
+            if (distSq < (maxLockRadius * maxLockRadius) && distSq < closestDistSq) {
+                closestDistSq = distSq;
+                currentTarget = mesh;
+            }
+        }
+
+        debugStr += `CurrentTarget: ${currentTarget ? currentTarget.id : 'NONE'}<br>`;
+        diagEl.innerHTML = debugStr;
+
+        if (currentTarget) {
+            // Un-hide UI
+            this.lockUiEl.classList.remove('hidden');
+
+            if (this.lockTarget === currentTarget) {
+                // Maintained lock!
+                this.lockTimer = Math.min(3.0, this.lockTimer + dt);
+            } else {
+                // New target acquired, reset timer
+                this.lockTarget = currentTarget;
+                this.lockTimer = 0.0;
+                this.isLocked = false;
+                this.lockUiEl.classList.remove('locked');
+            }
+        } else {
+            // Target lost
+            this.lockTarget = null;
+            this.lockTimer = Math.max(0, this.lockTimer - dt * 2.0); // Fast decay instead of instant harsh snap
+            if (this.lockTimer <= 0) {
+                this.isLocked = false;
+                this.lockUiEl.classList.remove('locked');
+                this.lockUiEl.classList.add('hidden');
+            }
+        }
+
+        if (this.lockTarget) {
+            // Calculate screen space coordinates for the 3D target
+            const tempV = new THREE.Vector3();
+            // Get raw world pos
+            this.lockTarget.getWorldPosition(tempV);
+            // Project directly to 2D screen coordinates via camera matrix
+            tempV.project(this.camera);
+
+            const x = (tempV.x * 0.5 + 0.5) * window.innerWidth;
+            const y = (-(tempV.y * 0.5) + 0.5) * window.innerHeight;
+
+            // Only track if it is physically in front of the camera projection
+            if (tempV.z < 1.0) {
+                this.lockUiEl.style.left = `${x}px`;
+                this.lockUiEl.style.top = `${y}px`;
+
+                // Handle visual bracket animation
+                const progress = this.lockTimer / 3.0; // 0.0 to 1.0
+
+                // Cyan -> Yellow -> Orange -> Red Interpolation
+                let color = new THREE.Color();
+                if (progress < 0.33) {
+                    color.lerpColors(new THREE.Color('#00ffff'), new THREE.Color('#ffff00'), progress / 0.33);
+                } else if (progress < 0.66) {
+                    color.lerpColors(new THREE.Color('#ffff00'), new THREE.Color('#ff8800'), (progress - 0.33) / 0.33);
+                } else {
+                    color.lerpColors(new THREE.Color('#ff8800'), new THREE.Color('#ff0000'), (progress - 0.66) / 0.34);
+                }
+                const cssColor = `#${color.getHexString()}`;
+
+                // Squeeze tracker aggressively as it locks
+                const scale = 1.0 - (progress * 0.4);
+                this.lockUiEl.style.transform = `translate(-50%, -50%) scale(${scale})`;
+
+                this.lockBrackets.forEach(br => {
+                    br.style.borderColor = cssColor;
+                });
+
+                // Trigger formal UI lock
+                if (progress >= 1.0 && !this.isLocked) {
+                    this.isLocked = true;
+                    this.lockUiEl.classList.add('locked');
+                }
+            } else {
+                this.lockUiEl.classList.add('hidden'); // Behind camera
+            }
+        }
+    }
 
     /**
      * Flight Mode physics tick. Called each frame when flightActive === true.
@@ -739,6 +896,21 @@ export class MechaController {
         const firerate = { 1: 250, 2: 80, 3: 350, 4: 800 };
         if (now - this.lastShotTime < (firerate[fireMode] ?? 250)) return;
 
+        // -- MODE 3: Dual-Strike Missile Intercept --
+        if (fireMode === 3) {
+            // Cannot fire missiles without a solid Red Lock!
+            if (!this.isLocked || !this.lockTarget) {
+                // Flash the Lock UI red to indicate failure
+                if (this.lockUiEl && !this.lockUiEl.classList.contains('hidden')) {
+                    this.lockBrackets.forEach(br => br.style.borderColor = 'gray');
+                    setTimeout(() => {
+                        this.lockBrackets.forEach(br => br.style.borderColor = 'red');
+                    }, 50);
+                }
+                return;
+            }
+        }
+
         // Ammo check
         const a = this.ammo[fireMode];
         if (!a || a.isReloading || a.rounds <= 0) return;
@@ -770,7 +942,29 @@ export class MechaController {
             : camForward;
 
         this.muzzleFlash.triggerMuzzleFlash(barrelPos, fireMode);
-        this.createProjectile(barrelPos, shootDir, fireMode);
+
+        // Standard vs Dual-Missile Spawning
+        if (fireMode === 3) {
+            // Calculate dual barrel positions based on Mecha geometry (one left arm, one right arm)
+            const leftBarrelLocal = new THREE.Vector3(-1.2, 3.35, 2.0);
+            const rightBarrelLocal = new THREE.Vector3(1.2, 3.35, 2.0);
+            const leftPos = leftBarrelLocal.applyMatrix4(this.mesh.matrixWorld);
+            const rightPos = rightBarrelLocal.applyMatrix4(this.mesh.matrixWorld);
+
+            // Spawn Left Arm (Direct Strike)
+            this.createProjectile(leftPos, shootDir, 3, { target: this.lockTarget, type: 'direct' });
+
+            setTimeout(() => {
+                // Spawn Right Arm (Flanking Strike) with a 200ms stagger offset for cinematic effect
+                if (this.mesh && this.mesh.parent) { // Ensure mecha still exists
+                    this.muzzleFlash.triggerMuzzleFlash(rightPos, fireMode);
+                    this.createProjectile(rightPos, shootDir, 3, { target: this.lockTarget, type: 'flank' });
+                }
+            }, 200);
+
+        } else {
+            this.createProjectile(barrelPos, shootDir, fireMode);
+        }
     }
 
     /**

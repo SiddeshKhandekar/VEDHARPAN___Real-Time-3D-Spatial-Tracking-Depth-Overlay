@@ -137,6 +137,8 @@ class DioramaScene {
         this.physicsCloakMat = new THREE.MeshBasicMaterial({ color: 0x00ffff, wireframe: true, transparent: false });
         this.isPhysicsCloakActive = false;
 
+        this.activeMissiles = []; // Track active dual-strike missiles for steering computation
+
         // 5. Create Dynamic Hand Shadow Occluder Mesh
         this.createHandRigs();
 
@@ -938,7 +940,7 @@ class DioramaScene {
                             this.camera,
                             this.mechaWrapper,
                             this.effects,
-                            (pos, dir, mode) => this.spawnProjectile(pos, dir, mode)
+                            (pos, dir, mode, opts) => this.spawnProjectile(pos, dir, mode, opts)
                         );
 
                         // Attach engine plume particles (uses the same loader, no extra cost)
@@ -950,6 +952,19 @@ class DioramaScene {
             },
             undefined,
             (error) => console.error('Error loading Room Model:', error)
+        );
+
+        // Pre-load the new Homing Missile Asset
+        loader.load(
+            `${assetPath}missile.glb`,
+            (gltf) => {
+                this.missileTemplate = gltf.scene;
+                this.missileTemplate.scale.set(0.12, 0.12, 0.12); // Adjust if missile is huge
+                // Assuming it's already structured well, we just need it available to clone on fire
+                console.log('Loaded: Homing Missile Asset Template');
+            },
+            undefined,
+            (error) => console.error('Error loading Missile:', error)
         );
 
         // 3. Load Space Globe Background
@@ -1886,12 +1901,100 @@ class DioramaScene {
     }
 
     /**
+     * Instantiates and tracks a dynamic Homing Missile entity.
+     */
+    _spawnHomingMissile(position, direction, opts) {
+        if (!this.missileTemplate) {
+            console.warn("Missile Template not loaded yet!");
+            return;
+        }
+
+        const mesh = this.missileTemplate.clone(true);
+        mesh.position.copy(position);
+        mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), direction);
+        this.scene.add(mesh);
+
+        // Core visual path trail
+        const trailMat = new THREE.LineBasicMaterial({ color: 0xffffff, linewidth: 2, transparent: true, opacity: 0.8 });
+        const trailGeo = new THREE.BufferGeometry();
+        // Pre-allocate buffer for 300 points (5 seconds at 60fps)
+        const maxPoints = 500;
+        const positions = new Float32Array(maxPoints * 3);
+        for (let i = 0; i < 3; i++) positions[i] = position.getComponent(i);
+        trailGeo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+
+        const trailLine = new THREE.Line(trailGeo, trailMat);
+        this.scene.add(trailLine);
+
+        // Plume attachment (clone engine plume and attach to back of missile)
+        if (this.mechaController && this.mechaController.plumes && this.mechaController.plumes['backMain']) {
+            const originalPlume = this.mechaController.plumes['backMain'].mesh;
+            if (originalPlume) {
+                const plumeClone = originalPlume.clone(true);
+                plumeClone.scale.set(0.4, 0.4, 0.4);
+                plumeClone.position.set(0, 0, -1.0); // Offset backward relative to missile mesh
+                plumeClone.rotation.x = Math.PI / 2; // Point exhaust backwards
+                mesh.add(plumeClone);
+            }
+        }
+
+        // Add spherical physics bounds
+        const radius = 0.35;
+        const speed = 75.0; // Very fast
+        const body = this.physicsWorld.addDynamicBody(mesh, 0.5, 'sphere', radius);
+        body.collisionFilterGroup = 2;
+        body.collisionFilterMask = 1;
+        body.ignoreGravity = true;
+        body.linearDamping = 0.1;
+
+        // Apply initial forward velocity perfectly along launch vector (like a railgun)
+        body.velocity.set(direction.x * speed, direction.y * speed, direction.z * speed);
+
+        const missileData = {
+            mesh, body, trailLine, trailPoints: 1, maxPoints,
+            positionsArray: positions,
+            target: opts.target,
+            type: opts.type, // 'direct' or 'flank'
+            speed: speed,
+            timer: 0.0,
+            originalVector: null, // Used to compute flanking reversal
+        };
+
+        this.activeMissiles.push(missileData);
+
+        // Explosion on impact
+        body.addEventListener('collide', (e) => {
+            if (missileData.isDead) return;
+            missileData.isDead = true;
+
+            // Mark original impact vector globally on the target so the flanker missile knows where to strike
+            if (missileData.type === 'direct' && opts.target) {
+                opts.target.userData.lastStrikeDir = direction.clone();
+            }
+
+            if (mesh.parent) {
+                let normal = new THREE.Vector3(e.contact.ni.x, e.contact.ni.y, e.contact.ni.z);
+                if (e.contact.bi === body) normal.negate();
+                const expPos = mesh.position.clone().add(normal.multiplyScalar(1.5));
+                this.effects.createExplosion(expPos, 3); // Missile explosion visuals
+
+                this.scene.remove(mesh);
+
+                // Trail fadeout decay
+                setTimeout(() => { this.scene.remove(trailLine); trailGeo.dispose(); trailMat.dispose(); }, 1500);
+
+                setTimeout(() => { if (body.world) this.physicsWorld.world.removeBody(body); }, 0);
+            }
+        });
+    }
+
+    /**
      * Spawns a projectile with mode-specific visuals, speed, and impact explosion.
      * @param {THREE.Vector3} position - Barrel tip world position
      * @param {THREE.Vector3} direction - Unit direction vector
      * @param {number} fireMode - 1=Plasma, 2=Rapid, 3=Spread, 4=Charged
      */
-    spawnProjectile(position, direction, fireMode = 1) {
+    spawnProjectile(position, direction, fireMode = 1, missileOptions = null) {
         // Tuned stats based on user request (Boosted ranges to survive the entire Void expanse)
         const speeds = { 1: 120, 2: 180, 3: 65, 4: 10 };
         const radii = { 1: 0.22, 2: 0.10, 3: 0.16, 4: 0.55 };
@@ -1902,14 +2005,11 @@ class DioramaScene {
         const radius = radii[fireMode] ?? 0.22;
         const lifetime = lifetimes[fireMode] ?? 3000;
 
-        // Mode 3 — Spread: fire 3 projectiles in a fan
+        // Mode 3 — Advanced Homing Missile
         if (fireMode === 3) {
-            const spread = 0.12;
-            const right = new THREE.Vector3(1, 0, 0).applyQuaternion(this.camera.quaternion);
-            [-1, 0, 1].forEach(offset => {
-                const fanned = direction.clone().addScaledVector(right, offset * spread).normalize();
-                this.spawnProjectile(position, fanned, 30); // Mode 30 = spread sub-pellet
-            });
+            if (missileOptions) {
+                this._spawnHomingMissile(position, direction, missileOptions);
+            }
             return;
         }
 
@@ -2117,8 +2217,106 @@ class DioramaScene {
         // 4. Render main loop frame
         if (this.activeAsteroidOrbit) {
             // Sweeps massive horizontal orbit
-            // Slowly tumbling internally
         }
+
+        // -- Active Missile Routing and Trailing AI -----------------------------
+        if (this.activeMissiles && this.activeMissiles.length > 0) {
+            // Traverse array backward since we might splice dead missiles
+            for (let i = this.activeMissiles.length - 1; i >= 0; i--) {
+                const m = this.activeMissiles[i];
+                if (m.isDead) {
+                    this.activeMissiles.splice(i, 1);
+                    continue;
+                }
+
+                m.timer += dt;
+                const bPos = new THREE.Vector3(m.body.position.x, m.body.position.y, m.body.position.z);
+                const vel = new THREE.Vector3(m.body.velocity.x, m.body.velocity.y, m.body.velocity.z);
+
+                // --- PATH TRAILING ---
+                // Slide the buffer over one position
+                if (m.trailPoints < m.maxPoints) {
+                    m.trailPoints++;
+                } else {
+                    for (let j = 0; j < (m.maxPoints - 1) * 3; j++) {
+                        m.positionsArray[j] = m.positionsArray[j + 3];
+                    }
+                }
+                const baseIdx = (m.trailPoints - 1) * 3;
+                m.positionsArray[baseIdx] = bPos.x;
+                m.positionsArray[baseIdx + 1] = bPos.y;
+                m.positionsArray[baseIdx + 2] = bPos.z;
+
+                m.trailLine.geometry.attributes.position.needsUpdate = true;
+                // Only render valid points
+                m.trailLine.geometry.setDrawRange(0, m.trailPoints);
+
+                // --- STEERING AI ---
+                if (m.target && !m.target.parent) {
+                    // Target was destroyed/removed from scene
+                    m.target = null;
+                }
+
+                if (m.target) {
+                    const tPos = new THREE.Vector3();
+                    m.target.getWorldPosition(tPos);
+
+                    let desiredVector = new THREE.Vector3();
+
+                    if (m.type === 'direct') {
+                        // Direct strike - straight point to point
+                        desiredVector.subVectors(tPos, bPos).normalize();
+                    } else if (m.type === 'flank') {
+                        // Flanker strike: Wander dynamically, then strike hard
+                        if (m.timer < 2.0) { // Reduced from 5s so it stays closer before striking
+                            // Erratic climbing loop trajectory
+                            const loopY = Math.sin(m.timer * 5.0) * 0.5 + 0.5; // Upward bias
+                            const loopX = Math.cos(m.timer * 6.0);
+                            const loopZ = Math.sin(m.timer * 6.0);
+                            desiredVector.set(loopX, loopY, loopZ).normalize();
+                            // Apply a slow drift toward target but mostly keep looping
+                            desiredVector.addScaledVector(new THREE.Vector3().subVectors(tPos, bPos).normalize(), 0.4).normalize();
+                        } else {
+                            // Time is up! Aggressively divebomb the center of the asteroid.
+                            // The flanker is likely coming from a wide angle due to its early wandering, ensuring a flank strike naturally.
+                            desiredVector.subVectors(tPos, bPos).normalize();
+                        }
+                    }
+
+                    // Apply Steering vector (Slerp velocity vector smoothly)
+                    const currentVelDir = vel.clone().normalize();
+
+                    // Progressive agility tracking! 
+                    // Direct missiles turn extremely fast instantly.
+                    // Flank missiles have lower turn agility while wandering, but insanely sharp turning speed once time is up.
+                    let baseTurnAgility = 10.0;
+                    if (m.type === 'flank') {
+                        baseTurnAgility = m.timer < 1.5 ? 5.5 : 20.0;
+                    }
+                    if (m.type === 'direct') {
+                        baseTurnAgility = 12.0 + (m.timer * 4.0); // Continues to lock tighter the longer it takes
+                    }
+
+                    const turnRate = Math.min(1.0, baseTurnAgility * dt);
+                    let newDir = currentVelDir.lerp(desiredVector, turnRate).normalize();
+
+                    // 100% Guaranteed Hit Mechanism: Terminal Phase Snap-Lock
+                    // Enhanced to 120 radius for distant targets to prevent slight offsets
+                    if (bPos.distanceTo(tPos) < 120.0 && m.type !== 'flank') {
+                        newDir = desiredVector.clone();
+                    } else if (bPos.distanceTo(tPos) < 120.0 && m.timer >= 1.5) {
+                        newDir = desiredVector.clone();
+                    }
+
+                    m.body.velocity.set(newDir.x * m.speed, newDir.y * m.speed, newDir.z * m.speed);
+
+                    // Orient mesh strictly to facing velocity
+                    const meshTargetQuat = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, 1), newDir);
+                    m.mesh.quaternion.slerp(meshTargetQuat, 0.4);
+                }
+            }
+        }
+
         // Swarm all background zero-g components cleanly using 3D Lissajous path curves
         const baseTime = performance.now() * 0.00015; // Slow down orbital speed drastically
         for (let pair of this.physicsWorld.dynamicBodies) {
