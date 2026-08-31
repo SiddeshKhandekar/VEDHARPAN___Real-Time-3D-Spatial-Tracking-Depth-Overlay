@@ -128,6 +128,8 @@ class DioramaScene {
         this.camera.position.set(0, 1.5, 6);
         this.camera.lookAt(0, 1.5, 0);
 
+        this.rearCamera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 50000);
+
         // 4. Setup Lighting
         this.setupLights();
 
@@ -2173,7 +2175,43 @@ class DioramaScene {
             this.spaceTrainRig.rotation.y -= dt * 0.05; // Sweeping panoramic orbit
         }
 
-        this.renderer.render(this.scene, this.camera);
+        const isLookingBehind = this.cameraMode !== 0 && this.inputManager && this.inputManager.actions['lookBehind'];
+
+        if (isLookingBehind) {
+            const renderYaw = this.orbitYaw + Math.PI;
+            const renderPitch = -this.orbitPitch;
+
+            if (this.mechaController && this.mechaController.mesh) {
+                const mechaPos = this.mechaController.mesh.position;
+                const yawQuat = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), renderYaw);
+                const pitchQuat = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), renderPitch);
+                const orbitQuat = yawQuat.multiply(pitchQuat);
+
+                if (this.cameraMode === 1) {
+                    const offset = new THREE.Vector3(0, 4.35, -6).applyQuaternion(orbitQuat);
+                    let targetCamPos = mechaPos.clone().add(offset);
+                    const centerPoint = mechaPos.clone().add(new THREE.Vector3(0, 4.35, 0));
+                    targetCamPos = this._applyCameraCollision(centerPoint, targetCamPos);
+                    this.rearCamera.position.copy(targetCamPos);
+                    this.rearCamera.lookAt(mechaPos.clone().add(new THREE.Vector3(0, 3.85, 0)));
+                } else if (this.cameraMode === 2) {
+                    const headOffset = new THREE.Vector3(0, 4.15, 0.3).applyQuaternion(orbitQuat);
+                    this.rearCamera.position.copy(mechaPos.clone().add(headOffset));
+                    const forward = new THREE.Vector3(0, 0, 1).applyQuaternion(orbitQuat);
+                    this.rearCamera.lookAt(this.rearCamera.position.clone().add(forward.multiplyScalar(10)));
+                } else if (this.cameraMode === 3) {
+                    const shoulderOffset = new THREE.Vector3(0.8, 4.15, -2.8).applyQuaternion(orbitQuat);
+                    let targetCamPos = mechaPos.clone().add(shoulderOffset);
+                    const centerPoint = mechaPos.clone().add(new THREE.Vector3(0, 4.15, 0));
+                    targetCamPos = this._applyCameraCollision(centerPoint, targetCamPos);
+                    this.rearCamera.position.copy(targetCamPos);
+                    const forward = new THREE.Vector3(0, 0, 1).applyQuaternion(orbitQuat);
+                    this.rearCamera.lookAt(this.rearCamera.position.clone().add(forward.multiplyScalar(50)));
+                }
+            }
+        }
+
+        this.renderer.render(this.scene, isLookingBehind ? this.rearCamera : this.camera);
 
         // 5. Update Diagnostics
         this.updateFpsHud();

@@ -656,10 +656,10 @@ export class MechaController {
             if (child.isMesh && child.userData.isFill) {
                 if (this.isBoostDepleted) {
                     child.material.color.setHex(0xff2020);
-                    child.material.opacity = 0.2 + 0.2 * Math.abs(Math.sin(this._blinkPhase));
+                    child.material.opacity = 0.4 + 0.6 * Math.abs(Math.sin(this._blinkPhase));
                 } else {
-                    child.material.color.setHex(canBoost ? 0xffffff : 0x00f2fe);
-                    child.material.opacity = 0.15 + boostFrac * 0.35; // Lower max opacity for cleaner UI
+                    child.material.color.setHex(canBoost ? 0xc000ff : 0x00f2fe); // Matching purple for boost
+                    child.material.opacity = 0.2 + boostFrac * 0.8; // Scales up to 1.0 at full charge
                 }
             }
         });
