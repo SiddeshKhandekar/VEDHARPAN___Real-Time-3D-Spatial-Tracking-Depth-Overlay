@@ -57,6 +57,7 @@ class DioramaScene {
         this.mechaModel = null;
         this.tiresModel = null;
         this.collidableMeshes = [];
+        this.cameraOccluderMeshes = []; // Dedicated lightweight array strictly for Camera Wall Glitch prevention
 
         // Telemetry state
         this.latestHead = { x: 0, y: 0, z: 0 };
@@ -79,7 +80,7 @@ class DioramaScene {
         this.isRecentering = false;
 
         // Camera Modes: 0=Free Roam, 1=Third Person, 2=First Person, 3=Aiming
-        this.cameraMode = 0;
+        this.cameraMode = 1;
         this.cameraModeNames = ['Free Roam', 'Third Person', 'First Person', 'Aiming View'];
         this.previousCameraMode = undefined; // for right-click aim toggle
 
@@ -909,6 +910,7 @@ class DioramaScene {
                 this.roomModel.traverse((child) => {
                     if (child.isMesh) {
                         this.collidableMeshes.push(child);
+                        this.cameraOccluderMeshes.push(child); // Essential static occlusion
                     }
                 });
                 console.log('Loaded: Room Environment');
@@ -1408,6 +1410,7 @@ class DioramaScene {
                 this.cityMap.traverse((child) => {
                     if (child.isMesh) {
                         this.collidableMeshes.push(child);
+                        this.cameraOccluderMeshes.push(child); // Big building geometry is static
                     }
                 });
                 console.log('Loaded: City Map');
@@ -1636,7 +1639,7 @@ class DioramaScene {
      * Helper to perform GTA-style physical raycast bouncing for the camera against solid environment meshes.
      */
     _applyCameraCollision(centerPoint, idealPos) {
-        if (!this.collidableMeshes || this.collidableMeshes.length === 0) return idealPos.clone();
+        if (!this.cameraOccluderMeshes || this.cameraOccluderMeshes.length === 0) return idealPos.clone();
 
         const dist = centerPoint.distanceTo(idealPos);
         if (dist <= 0.1) return idealPos.clone();
@@ -1648,7 +1651,7 @@ class DioramaScene {
         this.camRaycaster.set(centerPoint, dir);
         this.camRaycaster.far = dist;
 
-        const hits = this.camRaycaster.intersectObjects(this.collidableMeshes, true);
+        const hits = this.camRaycaster.intersectObjects(this.cameraOccluderMeshes, true);
         if (hits.length > 0) {
             const safeDist = Math.max(0.0, hits[0].distance - 0.25);
             return centerPoint.clone().add(dir.multiplyScalar(safeDist));
