@@ -1122,9 +1122,15 @@ export class MechaController {
         const yawTarget = isLeft ? 0.42 : isRight ? -0.42 : 0.0;
         bp.pivot.rotation.z += (yawTarget - bp.pivot.rotation.z) * Math.min(1, dt * 8);
 
-        // Speed illusion: pitch backward by 90 degrees (+Math.PI/2) during boost
-        // Math.PI points down. 1.5 * Math.PI points perfectly backward.
-        const pitchTarget = isBoosting ? (Math.PI + 0.15 + Math.PI / 2) : (Math.PI + 0.15);
+        // Dynamically vector the plume based on the TRUE 3D pitch of the camera constraints!
+        // If the mecha is flying UP (camera pitched up), the plume should point DOWN to propel it.
+        const camFwd = new THREE.Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion);
+        // Math.asin gives the vertical angle from -PI/2 (looking perfectly down) to +PI/2 (looking perfectly up).
+        const flightPitch = Math.asin(camFwd.y); // Positive = looking up
+
+        // Speed illusion: pitch backward by 90 degrees (+Math.PI/2) natively.
+        // Subtract `flightPitch` to dynamically steer the thruster nozzle inversely to vertical movement!
+        const pitchTarget = isBoosting ? (Math.PI + 0.15 + Math.PI / 2 - flightPitch) : (Math.PI + 0.15);
         bp.pivot.rotation.x += (pitchTarget - bp.pivot.rotation.x) * Math.min(1, dt * 8);
 
         // Dynamic length: stretch the flame backwards heavily when boosting (3.0x multiplier)
