@@ -335,9 +335,11 @@ class DioramaScene {
 
         this.renderer.domElement.addEventListener('mousemove', (e) => {
             // BUG 2 FIX: Ensure pointer lock is strictly active to prevent corrupted unbounded mouse coordinates
-            if (this.cameraMode !== 0 && document.pointerLockElement !== this.renderer.domElement) return;
-            // Free Roam constraint: only move if actually clicking and dragging
-            if (this.cameraMode === 0 && !this.isDragging) return;
+            const isLocked = document.pointerLockElement === this.renderer.domElement;
+            if (this.cameraMode !== 0 && !isLocked) return;
+
+            // Free Roam constraint: only move if actually clicking and dragging OR if the pointer is fully locked
+            if (this.cameraMode === 0 && !this.isDragging && !isLocked) return;
 
             // BUG 1 FIX: If the flight system manually synced the camera yaw this precise frame, ignore the mouse delta
             // to completely prevent the camera from aggressively snapping back at the end of a boost phase.
