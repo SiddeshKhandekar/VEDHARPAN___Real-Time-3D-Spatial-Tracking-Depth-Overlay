@@ -476,6 +476,104 @@ html {
 }
 
 @keyframes flight-mode-pulse {
-    0%, 100% { opacity: 0.7; }
-    50% { opacity: 1.0; text-shadow: 0 0 18px rgba(0, 242, 254, 1.0); }
+
+    0%,
+    100% {
+        opacity: 0.7;
+    }
+
+    50% {
+        opacity: 1.0;
+        text-shadow: 0 0 18px rgba(0, 242, 254, 1.0);
+    }
+}
+
+/* ── Lock-On UI Tracker ────────────────────────────────────────────── */
+#lockon-ui {
+    position: absolute;
+    width: 60px;
+    height: 60px;
+    /* Default offset; gets overridden by inline styles */
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    pointer-events: none;
+    z-index: 100;
+}
+
+#lockon-ui.hidden {
+    display: none !important;
+}
+
+/* Tracker becomes red and pulses heavily when fully locked */
+#lockon-ui.locked .lockon-bracket {
+    border-color: red !important;
+    box-shadow: 0 0 10px red !important;
+    animation: lockPulse 0.2s infinite alternate !important;
+}
+
+#lockon-ui.locked #lockon-text {
+    display: block !important;
+}
+
+@keyframes lockPulse {
+    from {
+        transform: scale(1.0);
+    }
+
+    to {
+        transform: scale(0.9);
+    }
+}
+
+.lockon-bracket {
+    position: absolute;
+    width: 20px;
+    height: 20px;
+    border: 3px solid cyan;
+    box-shadow: 0 0 5px cyan;
+    transition: border-color 0.1s, box-shadow 0.1s;
+}
+
+/* Position the 4 corners to create a sci-fi brackets look */
+.lockon-bracket.top-left {
+    top: 0;
+    left: 0;
+    border-bottom: none;
+    border-right: none;
+}
+
+.lockon-bracket.top-right {
+    top: 0;
+    right: 0;
+    border-bottom: none;
+    border-left: none;
+}
+
+.lockon-bracket.bottom-left {
+    bottom: 0;
+    left: 0;
+    border-top: none;
+    border-right: none;
+}
+
+.lockon-bracket.bottom-right {
+    bottom: 0;
+    right: 0;
+    border-top: none;
+    border-left: none;
+}
+
+#lockon-text {
+    position: absolute;
+    top: -25px;
+    width: 100%;
+    text-align: center;
+    font-family: 'Orbitron', monospace;
+    font-size: 11px;
+    font-weight: bold;
+    color: red;
+    text-shadow: 0 0 5px red;
+    display: none;
+    letter-spacing: 2px;
 }
