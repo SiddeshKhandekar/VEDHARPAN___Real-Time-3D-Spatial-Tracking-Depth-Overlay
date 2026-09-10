@@ -21,7 +21,10 @@ JSON Payload Schema (broadcast to each connected WebSocket client):
         "hands": [
             {
                 "center": { "x": float, "y": float, "z": float },
-                "landmarks": [ { "x": float, "y": float, "z": float }, ... ]
+                "landmarks": [ { "x": float, "y": float, "z": float }, ... ],
+                "gesture": "fist" | "open" | "point" | "none",
+                "handedness": "Left" | "Right" | "Unknown",
+                "index_tip": { "x": float, "y": float, "z": float }  // optional, present when gesture="point"
             }
         ],
         "timestamp": float   // Unix epoch seconds
@@ -46,7 +49,7 @@ import signal
 import sys
 import threading
 import time
-from typing import Set
+from typing import Optional, Set
 
 
 
@@ -305,23 +308,29 @@ class TelemetryBroker:
         Returns:
             A compact JSON string conforming to the payload schema in the PRD.
         """
+        serialised_hands = []
+        for h in frame.hands:
+            hand_entry = {
+                "center": {
+                    "x": round(h["center"].x, 6),
+                    "y": round(h["center"].y, 6),
+                    "z": round(h["center"].z, 6),
+                },
+                "landmarks": h["landmarks"],
+                "gesture": h.get("gesture", "none"),
+                "handedness": h.get("handedness", "Unknown"),
+            }
+            if "index_tip" in h:
+                hand_entry["index_tip"] = h["index_tip"]
+            serialised_hands.append(hand_entry)
+
         payload = {
             "head": {
                 "x": round(-frame.head.x, 6),
                 "y": round(frame.head.y, 6),
                 "z": round(frame.head.z, 6),
             },
-            "hands": [
-                {
-                    "center": {
-                        "x": round(h["center"].x, 6),
-                        "y": round(h["center"].y, 6),
-                        "z": round(h["center"].z, 6),
-                    },
-                    "landmarks": h["landmarks"]
-                }
-                for h in frame.hands
-            ],
+            "hands": serialised_hands,
             "timestamp": round(frame.timestamp, 6),
         }
         return json.dumps(payload, separators=(",", ":"))

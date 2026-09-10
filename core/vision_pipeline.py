@@ -552,14 +552,18 @@ class VisionPipeline:
             smooth_head = self._head_ema.update(raw_head)
             
             smooth_hands = []
-            for i, (raw_hand_center, raw_landmarks, gesture) in enumerate(extracted_hands):
+            for i, (raw_hand_center, raw_landmarks, gesture, handedness, index_tip) in enumerate(extracted_hands):
                 if i < len(self._hand_emas):
                     smooth_center = self._hand_emas[i].update(raw_hand_center)
-                    smooth_hands.append({
+                    hand_entry = {
                         "center": smooth_center,
                         "landmarks": raw_landmarks,
-                        "gesture": gesture
-                    })
+                        "gesture": gesture,
+                        "handedness": handedness,
+                    }
+                    if index_tip is not None:
+                        hand_entry["index_tip"] = index_tip
+                    smooth_hands.append(hand_entry)
             
             # Reset unused EMAs
             for i in range(len(extracted_hands), len(self._hand_emas)):
@@ -656,8 +660,12 @@ class VisionPipeline:
 
     def _classify_gesture(self, landmarks) -> str:
         """Classify a hand gesture from MediaPipe landmarks.
-        
-        Detects "aim" (thumb up, index extended) and "fire" (thumb down, index extended).
+
+        Detects four gesture states for the Construct (Mode 4) system:
+            - "fist"  : All fingers curled toward palm (trigger lock-drawing).
+            - "open"  : All five fingers extended (trigger 3D conversion).
+            - "point" : Only index finger extended (drawing mode).
+            - "none"  : Default fallback.
         """
         # Landmark indices
         THUMB_TIP = 4
@@ -665,32 +673,56 @@ class VisionPipeline:
         INDEX_TIP = 8
         INDEX_MCP = 5
         MIDDLE_TIP = 12
+        MIDDLE_MCP = 9
         RING_TIP = 16
+        RING_MCP = 13
         PINKY_TIP = 20
+        PINKY_MCP = 17
         WRIST = 0
-        
+        PALM_CENTER = 9  # Middle finger MCP — approximate palm centre
+
         # Helper: is a finger tip further from wrist than its MCP/base?
         def is_extended(tip_idx, mcp_idx):
             tip_dist = ((landmarks[tip_idx].x - landmarks[WRIST].x)**2 + (landmarks[tip_idx].y - landmarks[WRIST].y)**2)**0.5
             mcp_dist = ((landmarks[mcp_idx].x - landmarks[WRIST].x)**2 + (landmarks[mcp_idx].y - landmarks[WRIST].y)**2)**0.5
             return tip_dist > mcp_dist + 0.02
-        
-        # Check if index is extended and others are curled
-        index_ext = is_extended(INDEX_TIP, INDEX_MCP)
-        middle_ext = is_extended(MIDDLE_TIP, 9)
-        ring_ext = is_extended(RING_TIP, 13)
-        pinky_ext = is_extended(PINKY_TIP, 17)
-        
+
+        # Helper: is a finger tip curled (closer to wrist than its MCP)?
+        def is_curled(tip_idx, mcp_idx):
+            tip_dist = ((landmarks[tip_idx].x - landmarks[WRIST].x)**2 + (landmarks[tip_idx].y - landmarks[WRIST].y)**2)**0.5
+            mcp_dist = ((landmarks[mcp_idx].x - landmarks[WRIST].x)**2 + (landmarks[mcp_idx].y - landmarks[WRIST].y)**2)**0.5
+            return tip_dist < mcp_dist + 0.01
+
+        index_ext  = is_extended(INDEX_TIP, INDEX_MCP)
+        middle_ext = is_extended(MIDDLE_TIP, MIDDLE_MCP)
+        ring_ext   = is_extended(RING_TIP, RING_MCP)
+        pinky_ext  = is_extended(PINKY_TIP, PINKY_MCP)
+
+        index_curl  = is_curled(INDEX_TIP, INDEX_MCP)
+        middle_curl = is_curled(MIDDLE_TIP, MIDDLE_MCP)
+        ring_curl   = is_curled(RING_TIP, RING_MCP)
+        pinky_curl  = is_curled(PINKY_TIP, PINKY_MCP)
+
+        # Thumb curl: tip closer to palm center than to its IP joint
+        thumb_to_palm = ((landmarks[THUMB_TIP].x - landmarks[PALM_CENTER].x)**2 +
+                         (landmarks[THUMB_TIP].y - landmarks[PALM_CENTER].y)**2)**0.5
+        thumb_to_ip   = ((landmarks[THUMB_TIP].x - landmarks[THUMB_IP].x)**2 +
+                         (landmarks[THUMB_TIP].y - landmarks[THUMB_IP].y)**2)**0.5
+        thumb_curled = thumb_to_palm < thumb_to_ip
+
+        # --- FIST: all 4 fingers curled + thumb curled toward palm ---
+        if index_curl and middle_curl and ring_curl and pinky_curl and thumb_curled:
+            return "fist"
+
+        # --- OPEN: all 5 fingers extended ---
+        thumb_ext = not thumb_curled  # thumb is away from palm
+        if index_ext and middle_ext and ring_ext and pinky_ext and thumb_ext:
+            return "open"
+
+        # --- POINT: only index extended, others curled ---
         if index_ext and not middle_ext and not ring_ext and not pinky_ext:
-            # It's a pointing gesture. Check thumb for aim vs fire.
-            # Thumb up: tip is higher (lower y value) than IP joint.
-            # Thumb down: tip is tucked in (higher y or close to index base).
-            thumb_is_up = landmarks[THUMB_TIP].y < landmarks[THUMB_IP].y - 0.02
-            if thumb_is_up:
-                return "aim"
-            else:
-                return "fire"
-                
+            return "point"
+
         return "none"
 
     def _extract_hands(
@@ -698,17 +730,18 @@ class VisionPipeline:
         hand_results,
         frame_width:  int,
         frame_height: int,
-    ) -> List[Tuple[SpatialVector, List[Dict[str, float]], str]]:
-        """Extract raw (un-smoothed) hand vectors, landmarks, and gestures.
+    ) -> List[Tuple[SpatialVector, List[Dict[str, float]], str, str, Optional[Dict[str, float]]]]:
+        """Extract raw (un-smoothed) hand vectors, landmarks, gestures, handedness, and index tip.
 
         Returns:
-            A list of tuples (SpatialVector, List[Dict], str) containing center, landmarks, and gesture.
+            A list of tuples:
+                (SpatialVector, List[Dict], gesture_str, handedness_str, index_tip_dict_or_None)
         """
         if not hand_results.hand_landmarks:
             return []
 
         hands_data = []
-        for hand_landmark_list in hand_results.hand_landmarks:
+        for hand_idx, hand_landmark_list in enumerate(hand_results.hand_landmarks):
             # hand_landmark_list is List[NormalizedLandmark] (21 items)
             wrist = hand_landmark_list[WRIST_LANDMARK_IDX]
 
@@ -720,12 +753,23 @@ class VisionPipeline:
             )
             norm_z = _estimate_hand_depth(hand_landmark_list, frame_width, frame_height)
 
-            # Collect all 21 normalised landmark points for the frontend rig.
+            # --- Handedness detection ---
+            # MediaPipe labels from camera perspective; since we mirror X,
+            # "Left" from MP = user's Right hand and vice versa.
+            handedness_label = "Unknown"
+            if (hand_results.handedness
+                    and hand_idx < len(hand_results.handedness)
+                    and len(hand_results.handedness[hand_idx]) > 0):
+                mp_label = hand_results.handedness[hand_idx][0].category_name
+                # Flip because the camera image is mirrored
+                handedness_label = "Right" if mp_label == "Left" else "Left"
+
+            # Collect all 21 normalised landmark points for the frontend.
             all_landmarks: List[Dict[str, float]] = []
             for lm in hand_landmark_list:
                 # Invert the X coordinate to fix the hand mirror/chirality issue
                 mirrored_pixel_x = (1.0 - lm.x) * frame_width
-                
+
                 lm_norm_x, lm_norm_y = _normalise_pixel(
                     mirrored_pixel_x,
                     lm.y * frame_height,
@@ -738,8 +782,31 @@ class VisionPipeline:
                     "y": round(lm_norm_y, 5),
                     "z": round(lm_norm_z, 5),
                 })
-            
+
             gesture = self._classify_gesture(hand_landmark_list)
-            hands_data.append((SpatialVector(x=norm_x, y=norm_y, z=norm_z), all_landmarks, gesture))
+
+            # --- Index fingertip for 3D drawing (only when pointing) ---
+            index_tip_data = None
+            if gesture == "point":
+                idx_lm = hand_landmark_list[8]  # INDEX_FINGER_TIP
+                mirrored_idx_x = (1.0 - idx_lm.x) * frame_width
+                itx, ity = _normalise_pixel(
+                    mirrored_idx_x, idx_lm.y * frame_height,
+                    frame_width, frame_height,
+                )
+                itz = float(np.clip(idx_lm.z * 5.0, -1.0, 1.0))
+                index_tip_data = {
+                    "x": round(itx, 5),
+                    "y": round(ity, 5),
+                    "z": round(itz, 5),
+                }
+
+            hands_data.append((
+                SpatialVector(x=norm_x, y=norm_y, z=norm_z),
+                all_landmarks,
+                gesture,
+                handedness_label,
+                index_tip_data,
+            ))
 
         return hands_data
