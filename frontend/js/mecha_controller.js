@@ -600,6 +600,15 @@ export class MechaController {
         debugStr += `CurrentTarget: ${currentTarget ? currentTarget.id : 'NONE'}<br>`;
         diagEl.innerHTML = debugStr;
 
+        // Hide diagnostic logs in mode 3 (or permanently) to reduce UI clutter
+        if (inputManager.fireMode === 3) {
+            diagEl.style.display = 'none';
+        } else {
+            // Keep it hidden generally, unless actively debugging other modes. 
+            // Better yet, just hide it completely.
+            diagEl.style.display = 'none';
+        }
+
         if (currentTarget) {
             // Un-hide UI
             this.lockUiEl.classList.remove('hidden');

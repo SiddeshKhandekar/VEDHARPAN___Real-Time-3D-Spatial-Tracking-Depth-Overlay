@@ -448,6 +448,7 @@ class DioramaScene {
                         if (this.hudCameraMode) this.hudCameraMode.textContent = this.cameraModeNames[this.cameraMode];
                     }
                     this.constructMode.activate();
+                    this.setWebcamActive(true);
                 } else {
                     // Restore previous camera mode
                     if (this._preModeCamera !== undefined) {
@@ -456,6 +457,7 @@ class DioramaScene {
                         this._preModeCamera = undefined;
                     }
                     this.constructMode.deactivate();
+                    this.setWebcamActive(false);
                 }
             }
         });
@@ -1525,6 +1527,11 @@ class DioramaScene {
             this.hudStatus.textContent = 'Connected';
             this.hudStatus.className = 'connected';
             this.reconnectAttempt = 0;
+
+            // Sync webcam state with current fire mode over the fresh connection
+            if (this.inputManager) {
+                this.setWebcamActive(this.inputManager.fireMode === 4);
+            }
         };
 
         this.socket.onmessage = (event) => {
@@ -1575,6 +1582,18 @@ class DioramaScene {
         this.socket.onerror = (error) => {
             console.error('WebSocket Error:', error);
         };
+    }
+
+    /**
+     * Toggles the physical webcam in the Python backend via websocket command.
+     */
+    setWebcamActive(isActive) {
+        if (this.socket && this.socket.readyState === WebSocket.OPEN) {
+            this.socket.send(JSON.stringify({
+                command: "set_vision_active",
+                active: isActive
+            }));
+        }
     }
 
     /**

@@ -130,10 +130,12 @@ class TelemetryBroker:
     def __init__(
         self,
         telemetry_queue: "queue.Queue[TelemetryFrame]",
+        vision_pipeline,  # To control webcam pause/resume
         host: str = WEBSOCKET_HOST,
         port: int = WEBSOCKET_PORT,
     ) -> None:
         self._queue:   "queue.Queue[TelemetryFrame]" = telemetry_queue
+        self._vision_pipeline = vision_pipeline
         self._host:    str = host
         self._port:    int = port
         self._connected_clients: Set[ServerConnection] = set()
@@ -239,10 +241,15 @@ class TelemetryBroker:
             async for message in websocket:
                 try:
                     data = json.loads(message)
-                    if data.get("command") == "shutdown":
+                    cmd = data.get("command")
+                    if cmd == "shutdown":
                         logger.info("TelemetryBroker: Shutdown command received from client.")
                         import os, signal
                         os.kill(os.getpid(), signal.SIGINT)
+                    elif cmd == "set_vision_active":
+                        is_active = data.get("active", False)
+                        if self._vision_pipeline:
+                            self._vision_pipeline.set_active(is_active)
                 except json.JSONDecodeError:
                     pass
         finally:
@@ -397,6 +404,7 @@ class Application:
         )
         self._broker = TelemetryBroker(
             telemetry_queue = self._telemetry_queue,
+            vision_pipeline = self._vision_pipeline,
             host            = WEBSOCKET_HOST,
             port            = WEBSOCKET_PORT,
         )

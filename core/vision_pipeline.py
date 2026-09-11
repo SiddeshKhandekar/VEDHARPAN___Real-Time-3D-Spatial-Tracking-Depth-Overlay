@@ -342,6 +342,8 @@ class VisionPipeline:
         self._output_queue: "queue.Queue[TelemetryFrame]" = output_queue
         self._camera_index: int  = camera_index
         self._stop_event: threading.Event = threading.Event()
+        self._pause_event: threading.Event = threading.Event()
+        self._pause_event.set() # Default to paused until explicitly resumed
 
         # Background worker thread — daemon so it dies with the main process.
         self._thread: threading.Thread = threading.Thread(
@@ -392,6 +394,17 @@ class VisionPipeline:
     def is_running(self) -> bool:
         """True if the worker thread is alive and has not been asked to stop."""
         return self._thread.is_alive() and not self._stop_event.is_set()
+
+    def set_active(self, active: bool) -> None:
+        """Pause or resume the vision pipeline, toggling the physical webcam."""
+        if active:
+            if self._pause_event.is_set():
+                logger.info("VisionPipeline: Resuming capture (Camera ON).")
+                self._pause_event.clear()
+        else:
+            if not self._pause_event.is_set():
+                logger.info("VisionPipeline: Pausing capture (Camera OFF).")
+                self._pause_event.set()
 
     # ------------------------------------------------------------------
     # Internal worker loop — runs entirely inside the background thread
@@ -486,28 +499,35 @@ class VisionPipeline:
         This method runs exclusively inside the background thread. All
         resources (camera, MediaPipe) are acquired and released here to
         ensure correct CUDA thread affinity and guaranteed cleanup even
-        when an unhandled exception occurs.
+        when an unhandled exception occurs or when paused.
         """
-        cap: Optional[cv2.VideoCapture] = None
+        while not self._stop_event.is_set():
+            if self._pause_event.is_set():
+                # Yield thread while waiting to be resumed or stopped
+                time.sleep(0.1)
+                continue
 
-        try:
-            self._initialise_mediapipe()
-            cap = self._open_camera(self._camera_index)
-            self._capture_and_infer(cap)
+            cap: Optional[cv2.VideoCapture] = None
+            try:
+                self._initialise_mediapipe()
+                cap = self._open_camera(self._camera_index)
+                self._capture_and_infer(cap)
 
-        except RuntimeError as exc:
-            logger.error("VisionPipeline: %s", exc)
+            except RuntimeError as exc:
+                logger.error("VisionPipeline: %s", exc)
+                time.sleep(1.0) # Avoid tight fail-loops
 
-        except Exception as exc:
-            logger.exception(
-                "VisionPipeline: Unexpected error in capture loop — %s", exc
-            )
+            except Exception as exc:
+                logger.exception(
+                    "VisionPipeline: Unexpected error in capture loop — %s", exc
+                )
+                time.sleep(1.0)
 
-        finally:
-            if cap is not None and cap.isOpened():
-                cap.release()
-                logger.info("VisionPipeline: Camera device released.")
-            self._release_mediapipe()
+            finally:
+                if cap is not None and cap.isOpened():
+                    cap.release()
+                    logger.info("VisionPipeline: Camera device released.")
+                self._release_mediapipe()
 
     def _capture_and_infer(self, cap: cv2.VideoCapture) -> None:
         """Core per-frame loop: read → RGB convert → infer → EMA → enqueue.
@@ -519,7 +539,7 @@ class VisionPipeline:
         frame_count: int   = 0
         loop_start:  float = time.perf_counter()
 
-        while not self._stop_event.is_set():
+        while not self._stop_event.is_set() and not self._pause_event.is_set():
             success, bgr_frame = cap.read()
 
             if not success or bgr_frame is None:
