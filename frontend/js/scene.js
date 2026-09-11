@@ -441,8 +441,20 @@ class DioramaScene {
             // Activate/deactivate ConstructMode on mode 4 toggle
             if (this.constructMode) {
                 if (mode === 4) {
+                    // Auto-switch to 3rd Person so orbit yaw/pitch drives camera
+                    if (this.cameraMode !== 1 && this.cameraMode !== 3) {
+                        this._preModeCamera = this.cameraMode;
+                        this.cameraMode = 1;  // Third Person orbit
+                        if (this.hudCameraMode) this.hudCameraMode.textContent = this.cameraModeNames[this.cameraMode];
+                    }
                     this.constructMode.activate();
                 } else {
+                    // Restore previous camera mode
+                    if (this._preModeCamera !== undefined) {
+                        this.cameraMode = this._preModeCamera;
+                        if (this.hudCameraMode) this.hudCameraMode.textContent = this.cameraModeNames[this.cameraMode];
+                        this._preModeCamera = undefined;
+                    }
                     this.constructMode.deactivate();
                 }
             }
