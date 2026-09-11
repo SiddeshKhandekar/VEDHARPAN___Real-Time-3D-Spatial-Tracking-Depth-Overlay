@@ -7,6 +7,7 @@ import { InputManager } from './input_manager.js';
 import { VisualEffects } from './effects.js';
 import { MechaController } from './mecha_controller.js';
 import { SettingsManager, ACTIONS } from './settings.js';
+import { ConstructMode } from './construct_mode.js';
 
 /**
  * VEDHARPAN Phase 2: Three.js Viewport & Shadow Physics Engine
@@ -27,13 +28,8 @@ const PARALLAX_SENSITIVITY_Y = 1.8; // Controls camera Y-translation
 const FRUSTUM_WARP_SENSITIVITY_X = 180; // Frustum offset in pixels
 const FRUSTUM_WARP_SENSITIVITY_Y = 120; // Frustum offset in pixels
 
-// Hand Occluder Limits (Three.js World Coordinates)
-const OCCLUDER_MIN_X = -6.0;
-const OCCLUDER_MAX_X = 6.0;
-const OCCLUDER_MIN_Y = -1.0;
-const OCCLUDER_MAX_Y = 5.0;
-const OCCLUDER_MIN_Z = -5.0;
-const OCCLUDER_MAX_Z = 5.0;
+// Drawing plane depth (distance in front of mecha for 3D strokes)
+const CONSTRUCT_DRAW_DEPTH = 2.0;
 
 class DioramaScene {
     constructor() {
@@ -50,7 +46,7 @@ class DioramaScene {
         this.camera = null;
         this.renderer = null;
         this.dirLight = null;
-        this.handRigs = [];
+        this.constructMode = null; // Mode 4 Construct system
 
         // Assets
         this.roomModel = null;
@@ -744,83 +740,10 @@ class DioramaScene {
     }
 
     /**
-     * Create a 21-joint skeleton rig for the hand that casts real shadows.
-     *
-     * CRITICAL: MeshBasicMaterial with visible:false does NOT cast shadows
-     * in Three.js. We must use MeshStandardMaterial with opacity:0 and
-     * transparent:true. The mesh is optically invisible to the viewer but
-     * the renderer still writes it into the shadow depth pass.
+     * Initialise the ConstructMode (Mode 4) system.
      */
-    createHandRigs() {
-        this.handRigs = [];
-
-        // Shadow-only material: optically invisible, but rendered into shadow maps
-        const shadowOnlyMat = new THREE.MeshStandardMaterial({
-            color: 0x000000,
-            transparent: true,
-            opacity: 0.0,
-            roughness: 1.0,
-            metalness: 0.0,
-        });
-
-        const jointGeo = new THREE.SphereGeometry(0.22, 10, 10);
-
-        // Cylinder geometry for bones.
-        const boneGeo = new THREE.CylinderGeometry(0.22, 0.22, 1, 8);
-        boneGeo.translate(0, 0.5, 0); // Translate so origin is at one end
-
-        this.handConnections = [
-            // Thumb
-            [1, 2], [2, 3], [3, 4],
-            // Index
-            [5, 6], [6, 7], [7, 8],
-            // Middle
-            [9, 10], [10, 11], [11, 12],
-            // Ring
-            [13, 14], [14, 15], [15, 16],
-            // Pinky
-            [17, 18], [18, 19], [19, 20],
-
-            // Palm Solid Fill
-            [0, 1], [0, 5], [0, 9], [0, 13], [0, 17], // wrist to knuckles
-            [1, 5], [5, 9], [9, 13], [13, 17],        // horizontal knuckle webbing
-            [1, 17], [5, 17], [9, 17]                 // cross-palm fill
-        ];
-
-        for (let h = 0; h < 2; h++) {
-            const rigGroup = new THREE.Group();
-            const spheres = [];
-            const bones = [];
-
-            for (let i = 0; i < 21; i++) {
-                const sphere = new THREE.Mesh(jointGeo, shadowOnlyMat);
-                sphere.castShadow = true;
-                sphere.receiveShadow = false;
-                sphere.position.set(0, -10, 0); // Start out-of-frame
-                rigGroup.add(sphere);
-                spheres.push(sphere);
-            }
-
-            for (let i = 0; i < this.handConnections.length; i++) {
-                const bone = new THREE.Mesh(boneGeo, shadowOnlyMat);
-                bone.castShadow = true;
-                bone.receiveShadow = false;
-                bone.position.set(0, -10, 0);
-                rigGroup.add(bone);
-                bones.push(bone);
-            }
-
-            // Central palm volume proxy (slightly larger)
-            const palmGeo = new THREE.SphereGeometry(0.2, 10, 10);
-            const palm = new THREE.Mesh(palmGeo, shadowOnlyMat);
-            palm.castShadow = true;
-            palm.receiveShadow = false;
-            palm.position.set(0, -10, 0);
-            rigGroup.add(palm);
-
-            this.scene.add(rigGroup);
-            this.handRigs.push({ group: rigGroup, spheres, bones, palm });
-        }
+    initConstructMode() {
+        this.constructMode = new ConstructMode(this.scene, this.physicsWorld, this.camera);
     }
 
     /**
@@ -1582,15 +1505,16 @@ class DioramaScene {
                     this.latestHands = data.hands;
                     this.hudHand.textContent = `${data.hands.length} detected`;
 
+                    // Route new telemetry to ConstructMode (Mode 4)
+                    if (this.constructMode) {
+                        this.constructMode.onTelemetry(data.hands, data.head);
+                    }
+
                     if (this.inputManager && data.hands.length > 0) {
+                        // Use first hand's gesture for legacy aim/fire input
                         const hand = data.hands[0];
                         const gestures = hand.gesture ? [hand.gesture] : [];
-
-                        // Map hand center to world space aim target (e.g., Z=-10)
-                        const hx = THREE.MathUtils.mapLinear(hand.center.x, -1.0, 1.0, OCCLUDER_MIN_X, OCCLUDER_MAX_X);
-                        const hy = THREE.MathUtils.mapLinear(hand.center.y, -1.0, 1.0, OCCLUDER_MIN_Y, OCCLUDER_MAX_Y);
-                        const targetPos = new THREE.Vector3(hx, hy, -10);
-
+                        const targetPos = new THREE.Vector3(0, 0, -10);
                         this.inputManager.updateGestures(gestures, targetPos);
                     }
                 }
@@ -1782,70 +1706,7 @@ class DioramaScene {
         this.camera.lookAt(this.freeRoamOffset.x, this.freeRoamOffset.y + 1.5, this.freeRoamOffset.z);
     }
 
-    /**
-     * Process Hand coordinates and relocate the 21-joint skeleton occluder.
-     */
-    applyShadowOcclusion() {
-        const up = new THREE.Vector3(0, 1, 0);
-
-        for (let h = 0; h < 2; h++) {
-            const rig = this.handRigs[h];
-            const handData = (this.latestHands && h < this.latestHands.length) ? this.latestHands[h] : null;
-
-            if (handData && handData.landmarks && handData.landmarks.length === 21) {
-                // Position all 21 individual joint spheres
-                for (let i = 0; i < 21; i++) {
-                    const lm = handData.landmarks[i];
-                    const lmX = THREE.MathUtils.mapLinear(lm.x, -1.0, 1.0, OCCLUDER_MIN_X, OCCLUDER_MAX_X);
-                    const lmY = THREE.MathUtils.mapLinear(lm.y, -1.0, 1.0, OCCLUDER_MIN_Y, OCCLUDER_MAX_Y);
-                    const lmZ = THREE.MathUtils.mapLinear(lm.z, -1.0, 1.0, OCCLUDER_MIN_Z, OCCLUDER_MAX_Z);
-
-                    const sphere = rig.spheres[i];
-                    sphere.position.x += (lmX - sphere.position.x) * 0.35;
-                    sphere.position.y += (lmY - sphere.position.y) * 0.35;
-                    sphere.position.z += (lmZ - sphere.position.z) * 0.35;
-                }
-
-                // Update bones based on spheres positions
-                for (let i = 0; i < this.handConnections.length; i++) {
-                    const [idxA, idxB] = this.handConnections[i];
-                    const posA = rig.spheres[idxA].position;
-                    const posB = rig.spheres[idxB].position;
-
-                    const bone = rig.bones[i];
-                    const distance = posA.distanceTo(posB);
-                    if (distance > 0.001) {
-                        bone.position.copy(posA);
-                        bone.scale.set(1, distance, 1);
-
-                        const dir = new THREE.Vector3().subVectors(posB, posA).normalize();
-                        bone.quaternion.setFromUnitVectors(up, dir);
-                    }
-                }
-
-                // Update palm position (average of key points)
-                const palmIndices = [0, 5, 9, 13, 17];
-                const palmCenter = new THREE.Vector3();
-                for (const idx of palmIndices) {
-                    palmCenter.add(rig.spheres[idx].position);
-                }
-                palmCenter.divideScalar(palmIndices.length);
-                rig.palm.position.copy(palmCenter);
-
-            } else {
-                // Smoothly return all occluders out of frame when no hand detected
-                for (let i = 0; i < rig.spheres.length; i++) {
-                    const sphere = rig.spheres[i];
-                    sphere.position.y += (-10.0 - sphere.position.y) * 0.1;
-                }
-                for (let i = 0; i < rig.bones.length; i++) {
-                    const bone = rig.bones[i];
-                    bone.position.y += (-10.0 - bone.position.y) * 0.1;
-                }
-                rig.palm.position.y += (-10.0 - rig.palm.position.y) * 0.1;
-            }
-        }
-    }
+    // (Hand shadow occluder removed — landmarks now consumed by ConstructMode)
 
     /**
      * Compute and output actual active rendering FPS diagnostics to HUD.
@@ -2111,19 +1972,6 @@ class DioramaScene {
             case 0: // Free Roam
                 // Apply dynamic camera parallax and offset calculations
                 this.applyParallax(dt);
-
-                // Override camera if hand gesture aiming in Free Roam
-                if (this.inputManager && this.inputManager.gestureAimActive) {
-                    if (this.handRigs.length > 0) {
-                        const rig = this.handRigs[0];
-                        const palmPos = rig.palm.position;
-                        if (palmPos.y > -5) {
-                            const targetCamPos = new THREE.Vector3(palmPos.x, palmPos.y + 0.5, palmPos.z + 2);
-                            this.camera.position.lerp(targetCamPos, 0.1);
-                            this.camera.lookAt(palmPos.x, palmPos.y, palmPos.z - 10);
-                        }
-                    }
-                }
                 break;
 
             case 1: // Third Person — orbit camera around mecha using orbitYaw/orbitPitch
@@ -2187,8 +2035,8 @@ class DioramaScene {
         // Reset the flight camera intercept flag at the start of the next structural evaluation frame
         this._flightYawThisFrame = false;
 
-        // 2. Adjust dynamic shadow physics occluder positions
-        this.applyShadowOcclusion();
+        // 2. Update ConstructMode (Mode 4 hand-drawing system)
+        if (this.constructMode) this.constructMode.update(dt);
 
         // 3. Update Physics and Logic (Always loops, even under menu)
         if (this.physicsWorld) this.physicsWorld.step(dt);
