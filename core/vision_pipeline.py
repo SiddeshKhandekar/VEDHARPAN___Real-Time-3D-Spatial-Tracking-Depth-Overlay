@@ -51,7 +51,7 @@ import numpy as np
 
 # Path to downloaded .task model files (relative to project root)
 import pathlib
-_MODEL_DIR = pathlib.Path(__file__).resolve().parent / "models"
+_MODEL_DIR = pathlib.Path(__file__).resolve().parent.parent / "models"
 
 # ---------------------------------------------------------------------------
 # Module-level logger — honours the root logger configuration set in main.py
@@ -501,33 +501,37 @@ class VisionPipeline:
         ensure correct CUDA thread affinity and guaranteed cleanup even
         when an unhandled exception occurs or when paused.
         """
-        while not self._stop_event.is_set():
-            if self._pause_event.is_set():
-                # Yield thread while waiting to be resumed or stopped
-                time.sleep(0.1)
-                continue
+        try:
+            self._initialise_mediapipe()
+            
+            while not self._stop_event.is_set():
+                if self._pause_event.is_set():
+                    # Yield thread while waiting to be resumed or stopped
+                    time.sleep(0.1)
+                    continue
 
-            cap: Optional[cv2.VideoCapture] = None
-            try:
-                self._initialise_mediapipe()
-                cap = self._open_camera(self._camera_index)
-                self._capture_and_infer(cap)
+                cap: Optional[cv2.VideoCapture] = None
+                try:
+                    cap = self._open_camera(self._camera_index)
+                    self._capture_and_infer(cap)
 
-            except RuntimeError as exc:
-                logger.error("VisionPipeline: %s", exc)
-                time.sleep(1.0) # Avoid tight fail-loops
+                except RuntimeError as exc:
+                    logger.error("VisionPipeline: %s", exc)
+                    time.sleep(1.0) # Avoid tight fail-loops
 
-            except Exception as exc:
-                logger.exception(
-                    "VisionPipeline: Unexpected error in capture loop — %s", exc
-                )
-                time.sleep(1.0)
+                except Exception as exc:
+                    logger.exception(
+                        "VisionPipeline: Unexpected error in capture loop — %s", exc
+                    )
+                    time.sleep(1.0)
 
-            finally:
-                if cap is not None and cap.isOpened():
-                    cap.release()
-                    logger.info("VisionPipeline: Camera device released.")
-                self._release_mediapipe()
+                finally:
+                    if cap is not None and cap.isOpened():
+                        cap.release()
+                        logger.info("VisionPipeline: Camera device released.")
+
+        finally:
+            self._release_mediapipe()
 
     def _capture_and_infer(self, cap: cv2.VideoCapture) -> None:
         """Core per-frame loop: read → RGB convert → infer → EMA → enqueue.
