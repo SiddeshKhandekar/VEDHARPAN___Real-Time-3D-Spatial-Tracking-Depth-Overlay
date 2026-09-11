@@ -153,12 +153,17 @@ export class ConstructMode {
     }
 
     /**
-     * Bind orbit yaw/pitch references so head-aim can drive the camera.
-     * Pass objects of form { value: number } that scene.js reads.
+     * Bind live setter/getter callbacks so head-aim can drive the camera.
+     * @param {Function} setYaw   - scene.orbitYaw setter
+     * @param {Function} setPitch - scene.orbitPitch setter (already clamped)
+     * @param {Function} getYaw   - scene.orbitYaw getter
+     * @param {Function} getPitch - scene.orbitPitch getter
      */
-    bindOrbitRefs(yawRef, pitchRef) {
-        this._orbitYawRef = yawRef;
-        this._orbitPitchRef = pitchRef;
+    bindOrbitSetters(setYaw, setPitch, getYaw, getPitch) {
+        this._setOrbitYaw = setYaw;
+        this._setOrbitPitch = setPitch;
+        this._getOrbitYaw = getYaw;
+        this._getOrbitPitch = getPitch;
     }
 
     // ─── Telemetry Entry Point ────────────────────────────────────────────────
@@ -533,21 +538,19 @@ export class ConstructMode {
     // ─── Head Aiming ─────────────────────────────────────────────────────────
 
     _applyHeadAim(dt) {
-        if (!this._latestHead || !this._orbitYawRef || !this._orbitPitchRef) return;
+        if (!this._latestHead || !this._setOrbitYaw || !this._setOrbitPitch) return;
 
         const hx = this._latestHead.x;
         const hy = this._latestHead.y;
 
         if (Math.abs(hx) > HEAD_DEAD_ZONE) {
             const delta = Math.sign(hx) * (Math.abs(hx) - HEAD_DEAD_ZONE) * HEAD_SENSITIVITY * dt;
-            this._orbitYawRef.value += delta;
+            this._setOrbitYaw(this._getOrbitYaw() + delta);
         }
         if (Math.abs(hy) > HEAD_DEAD_ZONE) {
             // Inverted: head up → aim down
             const delta = Math.sign(hy) * (Math.abs(hy) - HEAD_DEAD_ZONE) * HEAD_SENSITIVITY * dt;
-            this._orbitPitchRef.value -= delta;
-            // Clamp pitch
-            this._orbitPitchRef.value = Math.max(-1.2, Math.min(1.2, this._orbitPitchRef.value));
+            this._setOrbitPitch(this._getOrbitPitch() - delta);
         }
 
         // Sync pending construct object position to mecha + camera forward

@@ -148,10 +148,13 @@ class DioramaScene {
 
         // 6.5 Mode 4 Construct Mode (requires physicsWorld to be ready)
         this.initConstructMode();
-        // Wire orbit refs so ConstructMode can drive camera aiming
-        this._orbitYawRef = { value: this.orbitYaw };
-        this._orbitPitchRef = { value: this.orbitPitch };
-        this.constructMode.bindOrbitRefs(this._orbitYawRef, this._orbitPitchRef);
+        // Give ConstructMode a live callback to set scene.orbitYaw/Pitch
+        this.constructMode.bindOrbitSetters(
+            (v) => { this.orbitYaw = v; },
+            (v) => { this.orbitPitch = Math.max(-1.2, Math.min(1.2, v)); },
+            () => this.orbitYaw,
+            () => this.orbitPitch
+        );
 
         // 7. Load Assets (Blocks rendering specifically until finished via the callback)
         this.loadAssets(() => {
@@ -2086,6 +2089,9 @@ class DioramaScene {
             this.mechaController.update(this.inputManager, dt, this.cameraMode);
         }
         if (this.effects) this.effects.update(dt);
+
+        // Construct Mode (Mode 4) per-frame tick
+        if (this.constructMode) this.constructMode.update(dt);
 
         // 4. Render main loop frame
         if (this.activeAsteroidOrbit) {
