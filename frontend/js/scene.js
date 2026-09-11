@@ -878,7 +878,10 @@ class DioramaScene {
                             (pos, dir, mode, opts) => this.spawnProjectile(pos, dir, mode, opts)
                         );
 
-                        // Attach engine plume particles (uses the same loader, no extra cost)
+                        // Wire ConstructMode reference so mode 4 shoot delegates correctly
+                        this.mechaController.constructMode = this.constructMode;
+
+                        // Attach engine plume particles
                         this.mechaController.loadPlumes(loader);
                     },
                     undefined,
