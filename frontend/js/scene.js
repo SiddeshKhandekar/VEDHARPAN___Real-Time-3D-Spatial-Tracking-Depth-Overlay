@@ -434,6 +434,15 @@ class DioramaScene {
                     detail: { mode, rounds: a.rounds, max: a.max, isReloading: a.isReloading, cooldownMs: a.cooldownMs }
                 }));
             }
+
+            // Activate/deactivate ConstructMode on mode 4 toggle
+            if (this.constructMode) {
+                if (mode === 4) {
+                    this.constructMode.activate();
+                } else {
+                    this.constructMode.deactivate();
+                }
+            }
         });
 
         window.addEventListener('ammoUpdate', ({ detail: d }) => {
