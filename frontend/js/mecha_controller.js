@@ -962,6 +962,17 @@ export class MechaController {
                 }
             }, 200);
 
+        } else if (fireMode === 4) {
+            // Mode 4: Construct — delegate to ConstructMode state machine
+            if (this.constructMode) {
+                const fired = this.constructMode.fire();
+                if (!fired) {
+                    // Not ready to fire yet — refund the ammo round
+                    a.rounds++;
+                    a.isReloading = false;
+                    a.reloadEnd = 0;
+                }
+            }
         } else {
             this.createProjectile(barrelPos, shootDir, fireMode);
         }

@@ -136,14 +136,22 @@ class DioramaScene {
 
         this.activeMissiles = []; // Track active dual-strike missiles for steering computation
 
-        // 5. Create Dynamic Hand Shadow Occluder Mesh
-        this.createHandRigs();
+        // 5. Initialise Mode 4 Construct system (requires scene + camera already set up)
+        // physicsWorld is not yet created here; initConstructMode is deferred to after step 6
+        // (actual call moved to after physicsWorld init below)
 
         // 6. Initialize Core Systems first (Must exist BEFORE GLTF parse callbacks bind Trimesh)
         this.physicsWorld = new PhysicsWorld();
         this.inputManager = new InputManager(this.camera, this.renderer.domElement);
         this.settingsManager.applyToInputManager(this.inputManager);
         this.effects = new VisualEffects(this.scene);
+
+        // 6.5 Mode 4 Construct Mode (requires physicsWorld to be ready)
+        this.initConstructMode();
+        // Wire orbit refs so ConstructMode can drive camera aiming
+        this._orbitYawRef = { value: this.orbitYaw };
+        this._orbitPitchRef = { value: this.orbitPitch };
+        this.constructMode.bindOrbitRefs(this._orbitYawRef, this._orbitPitchRef);
 
         // 7. Load Assets (Blocks rendering specifically until finished via the callback)
         this.loadAssets(() => {
