@@ -31,6 +31,7 @@ Usage:
     pipeline.stop()        # signals the thread to exit and releases the camera
 """
 
+import base64
 import logging
 import queue
 import threading
@@ -119,10 +120,12 @@ class TelemetryFrame:
         hands:     List of smoothed spatial vectors and landmarks for tracked hands,
                    including recognized gesture state ('none', 'aim', 'fire').
         timestamp: Creation time of the frame (Unix epoch seconds).
+        debug_image: Base64 JPEG string of the camera feed with 2D debug overlays.
     """
     head:      SpatialVector
     hands:     List[Dict[str, Any]] = field(default_factory=list)
     timestamp: float = 0.0
+    debug_image: Optional[str] = None
 
 
 # ---------------------------------------------------------------------------
@@ -593,11 +596,42 @@ class VisionPipeline:
             for i in range(len(extracted_hands), len(self._hand_emas)):
                 self._hand_emas[i].reset()
 
+            # --- Base64 Debug Image for UI ---
+            debug_base64: Optional[str] = None
+            try:
+                # Downscale heavily to 320x180 to save websocket bandwidth
+                debug_img = cv2.resize(bgr_frame, (320, 180), interpolation=cv2.INTER_AREA)
+                # Mirror to align with the normalized spatial output chirality
+                debug_img = cv2.flip(debug_img, 1)
+
+                # Draw endpoints and index tip
+                for i, hand in enumerate(extracted_hands):
+                    landmarks = hand[1]
+                    if landmarks is not None and len(landmarks) >= 21:
+                        # Draw full skeleton points
+                        for lm in landmarks:
+                            px = int((lm["x"] + 1.0) / 2.0 * 320)
+                            py = int((1.0 - lm["y"]) / 2.0 * 180)
+                            cv2.circle(debug_img, (px, py), 2, (0, 255, 0), -1)
+
+                        # Highlight index tip (index 8)
+                        index_lm = landmarks[8]
+                        ix = int((index_lm["x"] + 1.0) / 2.0 * 320)
+                        iy = int((1.0 - index_lm["y"]) / 2.0 * 180)
+                        cv2.circle(debug_img, (ix, iy), 5, (0, 0, 255), -1)
+                        cv2.putText(debug_img, f"PTR {i}", (ix+5, iy-5), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0,0,255), 1)
+                        
+                _, buffer = cv2.imencode('.jpg', debug_img, [cv2.IMWRITE_JPEG_QUALITY, 50])
+                debug_base64 = base64.b64encode(buffer).decode('utf-8')
+            except Exception as e:
+                logger.warning("VisionPipeline: Failed to encode debug image - %s", e)
+
             # --- Build and enqueue the telemetry frame ---
             telemetry = TelemetryFrame(
                 head           = smooth_head,
                 hands          = smooth_hands,
                 timestamp      = time.time(),
+                debug_image    = debug_base64,
             )
 
 

@@ -340,6 +340,9 @@ class TelemetryBroker:
             "hands": serialised_hands,
             "timestamp": round(frame.timestamp, 6),
         }
+        if getattr(frame, "debug_image", None) is not None:
+            payload["debug_image"] = frame.debug_image
+
         return json.dumps(payload, separators=(",", ":"))
 
     async def _send_to_all_clients(self, payload: str) -> None:
