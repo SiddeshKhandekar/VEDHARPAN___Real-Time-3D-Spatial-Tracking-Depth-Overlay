@@ -40,6 +40,8 @@ class DioramaScene {
         this.hudHead = document.getElementById('head-coords');
         this.hudHand = document.getElementById('hands-coords');
         this.hudCameraMode = document.getElementById('camera-mode');
+        this.debugStreamContainer = document.getElementById('debug-stream-container');
+        this.debugStreamFeed = document.getElementById('debug-stream-feed');
 
         // Main scene objects
         this.scene = null;
@@ -1560,6 +1562,10 @@ class DioramaScene {
                         this.inputManager.updateGestures(gestures, targetPos);
                     }
                 }
+
+                if (data.debug_image && this.debugStreamFeed) {
+                    this.debugStreamFeed.src = "data:image/jpeg;base64," + data.debug_image;
+                }
             } catch (err) {
                 console.error('Failed to parse telemetry payload:', err);
             }
@@ -1593,6 +1599,18 @@ class DioramaScene {
                 command: "set_vision_active",
                 active: isActive
             }));
+        }
+
+        // Toggle frontend diagnostic UI feed
+        if (this.debugStreamContainer) {
+            if (isActive) {
+                this.debugStreamContainer.classList.remove('hidden');
+            } else {
+                this.debugStreamContainer.classList.add('hidden');
+                if (this.debugStreamFeed) {
+                    this.debugStreamFeed.src = ""; // Clear visual state to prevent buffering old frames
+                }
+            }
         }
     }
 
