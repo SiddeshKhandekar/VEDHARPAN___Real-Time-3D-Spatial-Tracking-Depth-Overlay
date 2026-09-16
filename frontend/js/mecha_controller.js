@@ -549,25 +549,6 @@ export class MechaController {
         // Scan purely against physically registered dynamic entities
         const dynamicMeshes = this.physicsWorld.dynamicBodies.map(b => b.mesh).filter(m => !!m);
 
-        // ------------- DIAGNOSTIC HOOK ------------------
-        let diagEl = document.getElementById('debug-lock-diag');
-        if (!diagEl) {
-            diagEl = document.createElement('div');
-            diagEl.id = 'debug-lock-diag';
-            diagEl.style.position = 'fixed';
-            diagEl.style.top = '10px';
-            diagEl.style.right = '10px';
-            diagEl.style.background = 'rgba(0,0,0,0.8)';
-            diagEl.style.color = '#00ff00';
-            diagEl.style.padding = '10px';
-            diagEl.style.fontFamily = 'monospace';
-            diagEl.style.zIndex = '999999';
-            diagEl.style.pointerEvents = 'none';
-            document.body.appendChild(diagEl);
-        }
-        let debugStr = `Mode: ${inputManager.fireMode} | DynMeshes: ${dynamicMeshes.length}<br>`;
-        // ------------------------------------------------
-
         let currentTarget = null;
         let closestDistSq = Infinity;
         const maxLockRadius = 0.25; // 25% of the screen from the center
@@ -587,26 +568,10 @@ export class MechaController {
             // Calculate distance in normalized screen coordinates from center (0,0)
             const distSq = tempV.x * tempV.x + tempV.y * tempV.y;
 
-            if (distSq < 15.0) { // log nearby things
-                debugStr += `Obj[${mesh.id}]: dist=${distSq.toFixed(3)} z=${tempV.z.toFixed(2)}<br>`;
-            }
-
             if (distSq < (maxLockRadius * maxLockRadius) && distSq < closestDistSq) {
                 closestDistSq = distSq;
                 currentTarget = mesh;
             }
-        }
-
-        debugStr += `CurrentTarget: ${currentTarget ? currentTarget.id : 'NONE'}<br>`;
-        diagEl.innerHTML = debugStr;
-
-        // Hide diagnostic logs in mode 3 (or permanently) to reduce UI clutter
-        if (inputManager.fireMode === 3) {
-            diagEl.style.display = 'none';
-        } else {
-            // Keep it hidden generally, unless actively debugging other modes. 
-            // Better yet, just hide it completely.
-            diagEl.style.display = 'none';
         }
 
         if (currentTarget) {
