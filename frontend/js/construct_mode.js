@@ -2,51 +2,50 @@ import * as THREE from 'three';
 import * as CANNON from 'cannon-es';
 
 /**
- * ConstructMode — Mode 4 Hand-Drawing to 3D Object Firing System
+ * ConstructMode — Mode 4: Hand-Drawing to 3D Physics Object Launch
  *
- * Full state machine lifecycle:
- *   IDLE → DRAWING → LOCKED → CONVERTING → OBJECT_READY → HEAD_AIMING → FIRED/PLACED → COOLDOWN
+ * Simplified State Machine:
+ *   IDLE → DRAWING → OBJECT_READY → AIMING → FIRED → COOLDOWN
  *
- * Left hand controls:
- *   - Fist  → Lock current stroke / re-enter drawing after object exists
- *   - Open  → Convert locked stroke to 3D extruded object
- *
- * Right hand (pointing):
- *   - Index fingertip tracked in 3D viewport space as drawing input
- *
- * Point budget: 100 points shared across all objects per activation cycle.
+ * Gestures:
+ *   Right hand point (index only) → draw stroke points (right hand only)
+ *   Left hand fist held 400ms     → extrude stroke to 3D object immediately
+ *   Mouse hold (in AIMING)        → charges force meter (0–100%)
+ *   Mouse release (in AIMING)     → fires at proportional speed
  */
 
-// ─── Constants ──────────────────────────────────────────────────────────────
+// ─── Constants ───────────────────────────────────────────────────────────────
 const STATES = Object.freeze({
     IDLE: 'IDLE',
     DRAWING: 'DRAWING',
-    LOCKED: 'LOCKED',
-    CONVERTING: 'CONVERTING',
     OBJECT_READY: 'OBJECT_READY',
-    HEAD_AIMING: 'HEAD_AIMING',
-    PLACEMENT: 'PLACEMENT',
+    AIMING: 'AIMING',
     FIRED: 'FIRED',
     COOLDOWN: 'COOLDOWN',
 });
 
-const MAX_POINTS = 100;            // Total drawing budget per cycle
-const COOLDOWN_MS = 300_000;        // 5 minutes
-const LIFETIME_MS = 300_000;        // 5 minutes alive after fire/place
-const DESPAWN_ALTITUDE = -300;           // Auto-despawn threshold (world units)
-const FIST_CONFIRM_FRAMES = 5;          // Frames fist must hold before locking
+const MAX_POINTS = 150;       // Max stroke points per session
+const MIN_STROKE_DIST = 0.05;      // Min world-space distance between points (anti-aliasing)
+const FIST_HOLD_MS = 400;       // ms left-fist must be held to trigger extrusion
+const COOLDOWN_MS = 300_000;   // 5 minutes cooldown
+const LIFETIME_MS = 300_000;   // Spawned object lives 5 min
+const DESPAWN_ALT = -300;      // Auto-despawn if below this Y
 
-// Head-aiming config
-const HEAD_DEAD_ZONE = 0.15;           // ±15 % of normalised range
-const HEAD_SENSITIVITY = 1.5;           // radians / second at frame edge
+// Force meter / launch speed
+const CHARGE_MAX_MS = 2000;      // Full charge reached after 2 seconds
+const SPEED_MIN = 3;         // m/s at tap (0% charge)
+const SPEED_MAX = 20;        // m/s at full hold (100% charge)
 
-// Drawing plane config (meters in front of mecha)
-const DRAW_PLANE_DEPTH = -2.5;
+// Drawing plane depth in front of camera
+const DRAW_PLANE_DEPTH = 2.5;
 
-// Arrow key rotation increment (radians per frame)
+// Arrow key rotation
 const ROTATION_INCREMENT = (5 * Math.PI) / 180;
 
-// ─── Douglas-Peucker Path Simplification ────────────────────────────────────
+// Douglas-Peucker epsilon
+const DP_EPSILON = 0.03;
+
+// ─── Douglas-Peucker Path Simplification ─────────────────────────────────────
 function perpendicularDistance(point, lineStart, lineEnd) {
     const dx = lineEnd.x - lineStart.x;
     const dy = lineEnd.y - lineStart.y;
@@ -57,8 +56,7 @@ function perpendicularDistance(point, lineStart, lineEnd) {
 
 function douglasPeucker(points, epsilon) {
     if (points.length <= 2) return points;
-    let maxDist = 0;
-    let maxIdx = 0;
+    let maxDist = 0, maxIdx = 0;
     const end = points.length - 1;
     for (let i = 1; i < end; i++) {
         const d = perpendicularDistance(points[i], points[0], points[end]);
@@ -72,93 +70,97 @@ function douglasPeucker(points, epsilon) {
     return [points[0], points[end]];
 }
 
-// ─── Main Class ─────────────────────────────────────────────────────────────
+// ─── Main Class ───────────────────────────────────────────────────────────────
 export class ConstructMode {
     /**
-     * @param {THREE.Scene}    scene
-     * @param {PhysicsWorld}   physicsWorld
-     * @param {THREE.Camera}   camera
+     * @param {THREE.Scene}   scene
+     * @param {PhysicsWorld}  physicsWorld
+     * @param {THREE.Camera}  camera
+     * @param {InputManager}  inputManager  — for live mouseState polling
      */
-    constructor(scene, physicsWorld, camera) {
+    constructor(scene, physicsWorld, camera, inputManager) {
         this.scene = scene;
         this.physicsWorld = physicsWorld;
         this.camera = camera;
+        this._input = inputManager;
 
         // State
         this.state = STATES.IDLE;
-        this.active = false;  // true when fireMode === 4
+        this.active = false;
 
-        // Drawing budget
+        // Drawing
+        this._strokePoints = [];
         this.pointsRemaining = MAX_POINTS;
 
-        // Raw stroke points in normalised tip coords (accumulated per-frame)
-        this._strokePoints = [];          // current stroke: [{x,y,z}]
-        this._fistFrameCount = 0;
+        // Fist debounce — timestamp when fist gesture first detected
+        this._fistStart = null;
 
-        // Head telemetry (latest)
+        // Head telemetry
         this._latestHead = null;
 
-        // Arrow key states (set by InputManager)
+        // Orbit setters (bound from scene.js)
+        this._setOrbitYaw = null;
+        this._setOrbitPitch = null;
+        this._getOrbitYaw = null;
+        this._getOrbitPitch = null;
+
+        // Arrow key states (set by external code)
         this.arrowLeft = false;
         this.arrowRight = false;
         this.arrowUp = false;
         this.arrowDown = false;
 
-        // Orbit yaw/pitch for head-based aiming (written back to scene)
-        this._orbitYawRef = null;   // { value: number } passed from scene
-        this._orbitPitchRef = null;
-
-        // THREE objects
-        this._strokeLine = null;   // THREE.Line for live stroke
+        // THREE stroke line
+        this._strokeLine = null;
         this._strokeGeo = null;
-        this._constructObjects = [];   // array of { mesh, body, timeout }
 
-        // HUD element
+        // Spawned objects
+        this._constructObjects = [];
+
+        // Force meter
+        this._chargeStart = null;   // performance.now() when mousedown
+        this._charge = 0;      // 0..1
+
+        // HUD elements
         this._hudPoints = document.getElementById('construct-points');
+        this._meterWrap = document.getElementById('force-meter-wrap');
+        this._meterFill = document.getElementById('force-meter-fill');
 
         // Cooldown
         this._cooldownEnd = 0;
 
-        // Gesture debounce (left hand)
+        // Gesture tracking
         this._prevLeftGesture = 'none';
-        this._prevRightGesture = 'none';
 
-        // Build the live-stroke line geometry
         this._initStrokeLine();
-
         console.log('[ConstructMode] Initialised');
     }
 
     // ─── Lifecycle ────────────────────────────────────────────────────────────
 
-    /** Called by scene when fireMode changes to 4 */
     activate() {
         if (this.active) return;
         this.active = true;
         this.state = STATES.IDLE;
         this.pointsRemaining = MAX_POINTS;
         this._strokePoints = [];
-        this._fistFrameCount = 0;
+        this._fistStart = null;
+        this._chargeStart = null;
+        this._charge = 0;
         this._updateHUD();
         console.log('[ConstructMode] Activated');
     }
 
-    /** Called by scene when fireMode changes away from 4 */
     deactivate() {
         this.active = false;
         this._clearStrokeLine();
+        this._hideForceMeter();
         this.state = STATES.IDLE;
         this._hideHUD();
         console.log('[ConstructMode] Deactivated');
     }
 
-    /**
-     * Bind live setter/getter callbacks so head-aim can drive the camera.
-     * @param {Function} setYaw   - scene.orbitYaw setter
-     * @param {Function} setPitch - scene.orbitPitch setter (already clamped)
-     * @param {Function} getYaw   - scene.orbitYaw getter
-     * @param {Function} getPitch - scene.orbitPitch getter
-     */
+    /** Bind live orbit setters from scene.js */
     bindOrbitSetters(setYaw, setPitch, getYaw, getPitch) {
         this._setOrbitYaw = setYaw;
         this._setOrbitPitch = setPitch;
@@ -169,9 +171,9 @@ export class ConstructMode {
     // ─── Telemetry Entry Point ────────────────────────────────────────────────
 
     /**
-     * Called every WebSocket message with fresh telemetry data.
-     * @param {Array}  hands   - array of hand objects from telemetry
-     * @param {Object} head    - {x, y, z} head spatial vector
+     * Called every WebSocket message with fresh telemetry.
+     * @param {Array}  hands — hand objects from telemetry
+     * @param {Object} head  — {x, y, z}
      */
     onTelemetry(hands, head) {
         this._latestHead = head;
@@ -185,13 +187,11 @@ export class ConstructMode {
         }
 
         const leftGesture = leftHand ? leftHand.gesture : 'none';
-        const rightGesture = rightHand ? rightHand.gesture : 'none';
 
-        this._processRightHand(rightHand, rightGesture);
-        this._processLeftHand(leftHand, leftGesture);
+        this._processRightHand(rightHand);
+        this._processLeftHand(leftGesture);
 
         this._prevLeftGesture = leftGesture;
-        this._prevRightGesture = rightGesture;
     }
 
     // ─── Per-Frame Update ─────────────────────────────────────────────────────
@@ -201,95 +201,57 @@ export class ConstructMode {
      * @param {number} dt  delta-time in seconds
      */
     update(dt) {
-        if (!this.active) {
-            // Still check lifetime/altitude for already-fired objects
-            this._tickObjectLifetime();
-            return;
-        }
+        // Tick spawned object lifetime regardless of active state
+        this._tickObjectLifetime();
 
-        // Head-aiming drives orbit yaw/pitch
-        if (this.state === STATES.HEAD_AIMING && this._latestHead) {
+        if (!this.active) return;
+
+        // Head aiming drives orbit
+        if (this.state === STATES.AIMING && this._latestHead) {
             this._applyHeadAim(dt);
+            this._syncObjectToAim();
         }
 
-        // Arrow-key rotation in PLACEMENT mode
-        if (this.state === STATES.PLACEMENT) {
+        // Arrow-key rotation of the pending object
+        if (this.state === STATES.AIMING) {
             this._applyArrowRotation();
         }
 
-        // Always check altitude of live physics objects
-        this._tickObjectLifetime();
-    }
+        // Force meter charging (poll live mouse state every frame)
+        if (this.state === STATES.AIMING && this._input) {
+            const lmb = this._input.mouseState?.left ?? false;
 
-    // ─── Public Actions ───────────────────────────────────────────────────────
-
-    /**
-     * Called by MechaController when fireMode=4 and left-click fires.
-     * Returns true if the shot was consumed, false if not ready.
-     */
-    fire() {
-        if (this.state !== STATES.HEAD_AIMING && this.state !== STATES.PLACEMENT) {
-            return false;
+            if (lmb) {
+                // Button is held — accumulate charge
+                if (this._chargeStart === null) {
+                    this._chargeStart = performance.now();
+                }
+                this._charge = Math.min(
+                    (performance.now() - this._chargeStart) / CHARGE_MAX_MS,
+                    1.0
+                );
+                this._updateForceMeter(this._charge);
+            } else if (this._chargeStart !== null) {
+                // Button just released — fire!
+                this._fireWithCharge(this._charge);
+                this._chargeStart = null;
+                this._charge = 0;
+                this._hideForceMeter();
+            }
         }
-
-        const obj = this._constructObjects.find(o => !o.fired && !o.placed);
-        if (!obj) return false;
-
-        // Apply velocity in camera forward direction
-        const direction = new THREE.Vector3();
-        this.camera.getWorldDirection(direction);
-        const speed = 12;
-        obj.body.velocity.set(
-            direction.x * speed,
-            direction.y * speed,
-            direction.z * speed
-        );
-        obj.fired = true;
-
-        // Start 5-min lifetime timer
-        obj.timeout = setTimeout(() => this._despawnObject(obj), LIFETIME_MS);
-
-        this.state = STATES.FIRED;
-        this._enterCooldown();
-        return true;
     }
 
-    /**
-     * Place current object as static body at its current position.
-     * Called when left fist closes during PLACEMENT state.
-     */
-    placeObject() {
-        const obj = this._constructObjects.find(o => !o.fired && !o.placed);
-        if (!obj) return;
+    // ─── Right Hand: Drawing ──────────────────────────────────────────────────
 
-        obj.body.mass = 0;
-        obj.body.updateMassProperties();
-        obj.body.velocity.set(0, 0, 0);
-        obj.placed = true;
+    _processRightHand(rightHand) {
+        if (!rightHand) return;
+        const gesture = rightHand.gesture;
 
-        clearTimeout(obj.timeout);
-        obj.timeout = setTimeout(() => this._despawnObject(obj), LIFETIME_MS);
-
-        this.state = STATES.FIRED;
-        this._enterCooldown();
-    }
-
-    /**
-     * Called when InputManager detects left-click during HEAD_AIMING state.
-     * Alias to fire() for direct binding.
-     */
-    onFireClick() {
-        return this.fire();
-    }
-
-    // ─── State: Drawing ───────────────────────────────────────────────────────
-
-    _processRightHand(rightHand, gesture) {
-        if (gesture === 'point' && rightHand && rightHand.index_tip) {
+        if (gesture === 'point' && rightHand.index_tip) {
             if (this.pointsRemaining <= 0) return;
 
-            // Transition to DRAWING on first point
-            if (this.state === STATES.IDLE || this.state === STATES.OBJECT_READY) {
+            // Auto-start drawing on first point
+            if (this.state === STATES.IDLE) {
                 this.state = STATES.DRAWING;
                 this._updateHUD();
             }
@@ -297,47 +259,33 @@ export class ConstructMode {
             if (this.state === STATES.DRAWING) {
                 this._addStrokePoint(rightHand.index_tip);
             }
-        } else if (gesture === 'fist') {
-            // Right fist while HEAD_AIMING → switch to arrow-key PLACEMENT mode
-            if (this.state === STATES.HEAD_AIMING) {
-                this.state = STATES.PLACEMENT;
-                this._updateHUD();
-                console.log('[ConstructMode] STATE: PLACEMENT — use arrow keys to rotate, left fist to anchor');
-            }
-        } else if (gesture === 'open' && this.state === STATES.PLACEMENT) {
-            // Right open hand while PLACEMENT → return to HEAD_AIMING
-            this.state = STATES.HEAD_AIMING;
-            this._updateHUD();
-            console.log('[ConstructMode] STATE: HEAD_AIMING — restored from PLACEMENT');
         }
     }
 
     _addStrokePoint(indexTip) {
-        // Map normalised tip coords to a point on the drawing plane in world space.
-        // The plane sits DRAW_PLANE_DEPTH meters along the camera's local -Z axis.
-        const ndcX = indexTip.x;   // already normalised [-1, 1]
-        const ndcY = indexTip.y;
-
-        // Un-project via camera to a plane in front of the mecha
-        const vec = new THREE.Vector3(ndcX, ndcY, 0.5);
+        // Un-project the normalised tip coord onto a plane in front of camera
+        const vec = new THREE.Vector3(indexTip.x, indexTip.y, 0.5);
         vec.unproject(this.camera);
         const dir = vec.sub(this.camera.position).normalize();
 
-        // Intersect with a plane DRAW_PLANE_DEPTH units in camera-forward space
         const camForward = new THREE.Vector3();
         this.camera.getWorldDirection(camForward);
-        const planeOrigin = this.camera.position.clone().addScaledVector(camForward, Math.abs(DRAW_PLANE_DEPTH));
+        const planeOrigin = this.camera.position.clone()
+            .addScaledVector(camForward, DRAW_PLANE_DEPTH);
         const planeNormal = camForward.clone().negate();
 
-        const denom = planeNormal.dot(dir);
         let worldPoint;
+        const denom = planeNormal.dot(dir);
         if (Math.abs(denom) > 1e-6) {
             const t = planeNormal.dot(planeOrigin.clone().sub(this.camera.position)) / denom;
             worldPoint = this.camera.position.clone().addScaledVector(dir, t);
         } else {
-            // Fallback: fixed depth
             worldPoint = this.camera.position.clone().addScaledVector(dir, 3.0);
         }
+
+        // ── Min-distance filter: skip if too close to last point ──────────────
+        const last = this._strokePoints.at(-1);
+        if (last && worldPoint.distanceTo(last) < MIN_STROKE_DIST) return;
 
         this._strokePoints.push(worldPoint);
         this.pointsRemaining = Math.max(0, this.pointsRemaining - 1);
@@ -345,79 +293,67 @@ export class ConstructMode {
         this._updateHUD();
     }
 
-    // ─── State: Fist Lock / Convert ───────────────────────────────────────────
+    // ─── Left Hand: Fist → Extrude ────────────────────────────────────────────
 
-    _processLeftHand(leftHand, gesture) {
-        const prevGesture = this._prevLeftGesture;
-
+    _processLeftHand(gesture) {
         if (gesture === 'fist') {
-            this._fistFrameCount++;
+            // Start or continue the fist timer
+            if (this._fistStart === null) {
+                this._fistStart = performance.now();
+            }
+            const held = performance.now() - this._fistStart;
 
-            // Stable fist for N frames → lock drawing
-            if (this._fistFrameCount >= FIST_CONFIRM_FRAMES) {
-                if (this.state === STATES.DRAWING) {
-                    this.state = STATES.LOCKED;
-                    this._updateHUD();
-                    console.log('[ConstructMode] Drawing LOCKED');
-                }
-                // In PLACEMENT state, fist-close triggers place
-                if (this.state === STATES.PLACEMENT) {
-                    this.placeObject();
+            if (held >= FIST_HOLD_MS && this.state === STATES.DRAWING) {
+                if (this._strokePoints.length >= 3) {
+                    this._convertStrokeTo3D();  // transitions to OBJECT_READY → AIMING
+                } else {
+                    console.warn('[ConstructMode] Fist locked but stroke too short (< 3 points) — keep drawing');
                 }
             }
         } else {
-            this._fistFrameCount = 0;
-
-            // Fist → Open transition: convert stroke to 3D object
-            if (prevGesture === 'fist' && gesture === 'open') {
-                if (this.state === STATES.LOCKED && this._strokePoints.length >= 3) {
-                    this._convertStrokeTo3D();  // sets state to CONVERTING then OBJECT_READY
-                }
-            }
-
-            // Open hand while OBJECT_READY → go to HEAD_AIMING
-            if (gesture === 'open' && this.state === STATES.OBJECT_READY) {
-                this.state = STATES.HEAD_AIMING;
-                this._updateHUD();
-                console.log('[ConstructMode] STATE: HEAD_AIMING');
-            }
+            // Reset fist timer whenever gesture is NOT fist
+            this._fistStart = null;
         }
+
+        this._prevLeftGesture = gesture;
     }
 
     // ─── 3D Conversion ────────────────────────────────────────────────────────
 
     _convertStrokeTo3D() {
-        this.state = STATES.CONVERTING;
-        console.log('[ConstructMode] Converting stroke to 3D...', this._strokePoints.length, 'pts');
+        this.state = STATES.OBJECT_READY;
+        console.log('[ConstructMode] Extruding stroke —', this._strokePoints.length, 'pts');
+        this._updateHUD();
 
-        // 1. Project all world points onto a local 2D plane for shape building
         const points3D = this._strokePoints;
-        if (points3D.length < 3) {
-            this.state = STATES.DRAWING;
-            return;
-        }
 
-        // Build a local coordinate frame from the stroke's centroid and camera orientation
+        // Build local frame from stroke centroid + camera orientation
         const centroid = new THREE.Vector3();
         points3D.forEach(p => centroid.add(p));
         centroid.divideScalar(points3D.length);
 
         const camForward = new THREE.Vector3();
         this.camera.getWorldDirection(camForward);
-        const planeNormal = camForward.clone().negate(); // plane faces camera
+        const planeNormal = camForward.clone().negate();
         const planeRight = new THREE.Vector3(1, 0, 0);
         const planeUp = new THREE.Vector3().crossVectors(planeNormal, planeRight).normalize();
 
-        // Project each world point to local 2D coords
+        // Project to 2D
         const pts2D = points3D.map(p => {
             const rel = p.clone().sub(centroid);
             return new THREE.Vector2(rel.dot(planeRight), rel.dot(planeUp));
         });
 
-        // 2. Simplify using Douglas-Peucker
-        const simplified = douglasPeucker(pts2D, 0.03);
+        // Simplify
+        const simplified = douglasPeucker(pts2D, DP_EPSILON);
+        if (simplified.length < 3) {
+            console.warn('[ConstructMode] Simplified stroke too short — resetting');
+            this.state = STATES.DRAWING;
+            this._updateHUD();
+            return;
+        }
 
-        // 3. Build THREE.Shape from simplified 2D points
+        // Build shape
         const shape = new THREE.Shape();
         shape.moveTo(simplified[0].x, simplified[0].y);
         for (let i = 1; i < simplified.length; i++) {
@@ -425,26 +361,24 @@ export class ConstructMode {
         }
         shape.closePath();
 
-        // 4. Determine extrude depth proportional to bounding box
+        // Extrude depth proportional to bounding box
         const box = new THREE.Box2();
         simplified.forEach(p => box.expandByPoint(p));
         const size = new THREE.Vector2();
         box.getSize(size);
         const extrudeDepth = Math.max(0.15, Math.min((size.x + size.y) * 0.25, 1.5));
 
-        const extrudeSettings = {
+        const geometry = new THREE.ExtrudeGeometry(shape, {
             depth: extrudeDepth,
             bevelEnabled: true,
             bevelThickness: 0.04,
             bevelSize: 0.03,
             bevelSegments: 2,
-        };
-
-        const geometry = new THREE.ExtrudeGeometry(shape, extrudeSettings);
+        });
         geometry.computeBoundingBox();
-        geometry.center(); // centre at local origin
+        geometry.center();
 
-        // 5. Translucent glass-like material
+        // Translucent cyan glass material
         const material = new THREE.MeshPhysicalMaterial({
             color: 0x00f2fe,
             emissive: 0x003344,
@@ -460,20 +394,14 @@ export class ConstructMode {
         });
 
         const mesh = new THREE.Mesh(geometry, material);
-
-        // Orient mesh to face the camera (align flat face toward viewer)
-        const euler = new THREE.Euler(0, 0, 0, 'YXZ');
-        const camQuat = this.camera.quaternion.clone();
-        mesh.quaternion.copy(camQuat);
-
-        // Place at centroid
+        mesh.quaternion.copy(this.camera.quaternion);
         mesh.position.copy(centroid);
         this.scene.add(mesh);
 
-        // 6. Build Cannon.js ConvexPolyhedron from geometry vertices
+        // Build Cannon.js body
         const posArr = geometry.attributes.position.array;
-        const cannonVerts = [];
         const uniqueMap = new Map();
+        const cannonVerts = [];
         for (let i = 0; i < posArr.length; i += 3) {
             const key = `${posArr[i].toFixed(3)}_${posArr[i + 1].toFixed(3)}_${posArr[i + 2].toFixed(3)}`;
             if (!uniqueMap.has(key)) {
@@ -481,8 +409,6 @@ export class ConstructMode {
                 cannonVerts.push(new CANNON.Vec3(posArr[i], posArr[i + 1], posArr[i + 2]));
             }
         }
-
-        // Build face list — every 3 position indices form a triangle
         const cannonFaces = [];
         const idx = geometry.index ? geometry.index.array : null;
         if (idx) {
@@ -498,15 +424,13 @@ export class ConstructMode {
         let body;
         if (cannonFaces.length > 0 && cannonVerts.length >= 4) {
             try {
-                const shape = new CANNON.ConvexPolyhedron({ vertices: cannonVerts, faces: cannonFaces });
-                body = new CANNON.Body({ mass: 5, shape });
+                const cs = new CANNON.ConvexPolyhedron({ vertices: cannonVerts, faces: cannonFaces });
+                body = new CANNON.Body({ mass: 5, shape: cs });
             } catch (e) {
-                console.warn('[ConstructMode] ConvexPolyhedron fallback to Box:', e.message);
+                console.warn('[ConstructMode] ConvexPolyhedron fallback:', e.message);
             }
         }
-
         if (!body) {
-            // Fallback to box matching bounding box
             geometry.computeBoundingBox();
             const bb = geometry.boundingBox;
             const hw = (bb.max.x - bb.min.x) / 2;
@@ -519,97 +443,99 @@ export class ConstructMode {
         body.quaternion.copy(mesh.quaternion);
         body.linearDamping = 0.1;
         body.angularDamping = 0.4;
-        body.collisionFilterGroup = 2;  // projectile group
-        body.collisionFilterMask = 1;  // collide with environment
-
-        // Keep body kinematic until fired
-        body.type = CANNON.Body.KINEMATIC;
+        body.collisionFilterGroup = 2;
+        body.collisionFilterMask = 1;
+        body.type = CANNON.Body.KINEMATIC;  // stays frozen until fired
         body.velocity.set(0, 0, 0);
-
         this.physicsWorld.world.addBody(body);
 
-        // Register sync between mesh and body
-        const obj = { mesh, body, fired: false, placed: false, timeout: null };
-        this._constructObjects.push(obj);
+        this._constructObjects.push({ mesh, body, fired: false, timeout: null });
 
-        // Clear stroke line
+        // Clear the drawn stroke
         this._clearStrokeLine();
         this._strokePoints = [];
 
-        this.state = STATES.OBJECT_READY;
-        console.log('[ConstructMode] 3D object ready. State: OBJECT_READY');
-
-        // If budget allows, allow more drawing
-        if (this.pointsRemaining > 0) {
-            console.log(`[ConstructMode] ${this.pointsRemaining} points remaining for next object`);
-        }
+        // Auto-enter AIMING
+        this.state = STATES.AIMING;
+        this._updateHUD();
+        console.log('[ConstructMode] Object ready — STATE: AIMING');
     }
 
-    // ─── Head Aiming ─────────────────────────────────────────────────────────
+    // ─── Force-Meter Fire ─────────────────────────────────────────────────────
+
+    _fireWithCharge(charge) {
+        const obj = this._constructObjects.find(o => !o.fired);
+        if (!obj) return;
+
+        const speed = SPEED_MIN + charge * (SPEED_MAX - SPEED_MIN);
+        const dir = new THREE.Vector3();
+        this.camera.getWorldDirection(dir);
+
+        obj.body.type = CANNON.Body.DYNAMIC;
+        obj.body.updateMassProperties();
+        obj.body.velocity.set(dir.x * speed, dir.y * speed, dir.z * speed);
+        obj.fired = true;
+        obj.timeout = setTimeout(() => this._despawnObject(obj), LIFETIME_MS);
+
+        this.state = STATES.FIRED;
+        this._updateHUD();
+        this._enterCooldown();
+        console.log(`[ConstructMode] FIRED — speed ${speed.toFixed(1)} u/s (charge ${(charge * 100).toFixed(0)}%)`);
+    }
+
+    /** Legacy hook kept so MechaController's fire() call is a no-op in Mode 4 */
+    fire() { return false; }
+
+    // ─── Head Aiming ──────────────────────────────────────────────────────────
 
     _applyHeadAim(dt) {
-        if (!this._latestHead || !this._setOrbitYaw || !this._setOrbitPitch) return;
-
+        if (!this._latestHead || !this._setOrbitYaw) return;
+        const HEAD_DEAD_ZONE = 0.15;
+        const HEAD_SENSITIVITY = 1.5;
         const hx = this._latestHead.x;
         const hy = this._latestHead.y;
-
         if (Math.abs(hx) > HEAD_DEAD_ZONE) {
             const delta = Math.sign(hx) * (Math.abs(hx) - HEAD_DEAD_ZONE) * HEAD_SENSITIVITY * dt;
             this._setOrbitYaw(this._getOrbitYaw() + delta);
         }
         if (Math.abs(hy) > HEAD_DEAD_ZONE) {
-            // Inverted: head up → aim down
             const delta = Math.sign(hy) * (Math.abs(hy) - HEAD_DEAD_ZONE) * HEAD_SENSITIVITY * dt;
             this._setOrbitPitch(this._getOrbitPitch() - delta);
         }
-
-        // Sync pending construct object position to mecha + camera forward
-        this._syncObjectToAim();
     }
 
     _syncObjectToAim() {
-        const obj = this._constructObjects.find(o => !o.fired && !o.placed);
+        const obj = this._constructObjects.find(o => !o.fired);
         if (!obj) return;
-
         const dir = new THREE.Vector3();
         this.camera.getWorldDirection(dir);
-
         const targetPos = this.camera.position.clone().addScaledVector(dir, 4.0);
         obj.mesh.position.lerp(targetPos, 0.12);
         obj.body.position.copy(obj.mesh.position);
     }
 
-    // ─── Placement (Arrow Keys) ───────────────────────────────────────────────
-
     _applyArrowRotation() {
-        const obj = this._constructObjects.find(o => !o.fired && !o.placed);
+        const obj = this._constructObjects.find(o => !o.fired);
         if (!obj) return;
-
         if (this.arrowLeft) obj.mesh.rotateY(-ROTATION_INCREMENT);
         if (this.arrowRight) obj.mesh.rotateY(+ROTATION_INCREMENT);
         if (this.arrowUp) obj.mesh.rotateX(-ROTATION_INCREMENT);
         if (this.arrowDown) obj.mesh.rotateX(+ROTATION_INCREMENT);
-
         obj.body.quaternion.copy(obj.mesh.quaternion);
     }
 
-    // ─── Lifetime & Altitude ─────────────────────────────────────────────────
+    // ─── Lifetime & Despawn ───────────────────────────────────────────────────
 
     _tickObjectLifetime() {
         for (const obj of this._constructObjects) {
-            if (obj.fired && !obj.placed) {
-                // Sync mesh to physics body
+            if (obj.fired) {
                 obj.mesh.position.copy(obj.body.position);
                 obj.mesh.quaternion.copy(obj.body.quaternion);
-
-                // Unfreeze kinematic on fired objects
                 if (obj.body.type === CANNON.Body.KINEMATIC) {
                     obj.body.type = CANNON.Body.DYNAMIC;
                     obj.body.updateMassProperties();
                 }
-
-                // Check altitude
-                if (obj.body.position.y < DESPAWN_ALTITUDE) {
+                if (obj.body.position.y < DESPAWN_ALT) {
                     this._despawnObject(obj);
                 }
             }
@@ -619,17 +545,9 @@ export class ConstructMode {
     _despawnObject(obj) {
         clearTimeout(obj.timeout);
         this.scene.remove(obj.mesh);
-        if (obj.body.world) {
-            this.physicsWorld.world.removeBody(obj.body);
-        }
+        if (obj.body.world) this.physicsWorld.world.removeBody(obj.body);
         const idx = this._constructObjects.indexOf(obj);
         if (idx !== -1) this._constructObjects.splice(idx, 1);
-
-        // If all objects gone, check cooldown
-        const remainingActive = this._constructObjects.filter(o => !o.placed);
-        if (remainingActive.length === 0 && this.state === STATES.FIRED) {
-            this._enterCooldown();
-        }
     }
 
     // ─── Cooldown ─────────────────────────────────────────────────────────────
@@ -637,18 +555,16 @@ export class ConstructMode {
     _enterCooldown() {
         this.state = STATES.COOLDOWN;
         this._cooldownEnd = performance.now() + COOLDOWN_MS;
-        console.log('[ConstructMode] Cooldown started — 5 minutes');
-
-        setTimeout(() => {
-            this._resetCycle();
-        }, COOLDOWN_MS);
+        this._updateHUD();
+        console.log('[ConstructMode] Cooldown — 5 minutes');
+        setTimeout(() => this._resetCycle(), COOLDOWN_MS);
     }
 
     _resetCycle() {
         this.state = STATES.IDLE;
         this.pointsRemaining = MAX_POINTS;
         this._strokePoints = [];
-        this._fistFrameCount = 0;
+        this._fistStart = null;
         this._constructObjects = [];
         this._clearStrokeLine();
         this._updateHUD();
@@ -670,7 +586,6 @@ export class ConstructMode {
             opacity: 0.9,
             depthTest: false,
         });
-
         this._strokeLine = new THREE.Line(this._strokeGeo, mat);
         this._strokeLine.renderOrder = 999;
         this._strokeLine.visible = false;
@@ -680,7 +595,6 @@ export class ConstructMode {
     _updateStrokeLine() {
         const pts = this._strokePoints;
         if (pts.length < 2) { this._strokeLine.visible = false; return; }
-
         const posAttr = this._strokeGeo.attributes.position;
         for (let i = 0; i < pts.length && i < MAX_POINTS; i++) {
             posAttr.setXYZ(i, pts[i].x, pts[i].y, pts[i].z);
@@ -695,30 +609,48 @@ export class ConstructMode {
         if (this._strokeLine) this._strokeLine.visible = false;
     }
 
-    // ─── HUD ──────────────────────────────────────────────────────────────────
+    // ─── Force Meter HUD ──────────────────────────────────────────────────────
+
+    _updateForceMeter(charge) {
+        if (!this._meterWrap) return;
+        this._meterWrap.classList.remove('hidden');
+        if (this._meterFill) {
+            this._meterFill.style.height = `${Math.round(charge * 100)}%`;
+            // Colour shifts from cyan (low) to white-hot (full)
+            const r = Math.round(charge * 255);
+            const g = Math.round(242 - charge * 80);
+            const b = Math.round(254 - charge * 100);
+            this._meterFill.style.background = `rgb(${r},${g},${b})`;
+            this._meterFill.style.boxShadow = `0 0 ${8 + charge * 16}px rgba(${r},${g},${b},0.8)`;
+        }
+    }
+
+    _hideForceMeter() {
+        if (!this._meterWrap) return;
+        this._meterWrap.classList.add('hidden');
+        if (this._meterFill) this._meterFill.style.height = '0%';
+    }
+
+    // ─── Points / State HUD ───────────────────────────────────────────────────
 
     _updateHUD() {
         if (!this._hudPoints) return;
-        const stateLabels = {
-            [STATES.IDLE]: '✋ IDLE — Point right finger to draw',
-            [STATES.DRAWING]: '✏️ DRAWING — Left fist to lock',
-            [STATES.LOCKED]: '✊ LOCKED — Open left hand to extrude',
-            [STATES.CONVERTING]: '⚙️ CONVERTING...',
-            [STATES.OBJECT_READY]: '🟦 READY — Open left hand to aim',
-            [STATES.HEAD_AIMING]: '🎯 HEAD AIMING — Click to fire | Right fist to place',
-            [STATES.PLACEMENT]: '📐 PLACEMENT — Arrow keys rotate | Left fist to anchor',
+        const labels = {
+            [STATES.IDLE]: '✋ IDLE — Point right index to draw',
+            [STATES.DRAWING]: '✏️ DRAWING — Hold left fist 0.4s to extrude',
+            [STATES.OBJECT_READY]: '🟦 EXTRUDING...',
+            [STATES.AIMING]: '🎯 AIMING — Hold LMB to charge, release to fire',
             [STATES.FIRED]: '🚀 FIRED',
             [STATES.COOLDOWN]: '⏳ COOLDOWN — 5 min recharge',
         };
-        const label = stateLabels[this.state] || this.state;
+        const label = labels[this.state] || this.state;
         this._hudPoints.innerHTML =
-            `<span style="font-size:0.75rem;opacity:0.7">${label}</span>` +
+            `<span style="font-size:0.75rem;opacity:0.75">${label}</span>` +
             `<br>POINTS: ${this.pointsRemaining}/${MAX_POINTS}`;
         this._hudPoints.classList.remove('hidden');
     }
 
     _hideHUD() {
-        if (!this._hudPoints) return;
-        this._hudPoints.classList.add('hidden');
+        this._hudPoints?.classList.add('hidden');
     }
 }
