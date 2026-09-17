@@ -393,6 +393,23 @@ class VisionPipeline:
         if self._thread.is_alive():
             logger.warning("VisionPipeline: Worker thread did not exit within timeout.")
 
+    def set_active(self, is_active: bool) -> None:
+        """Enable or disable the camera capture loop without stopping the thread.
+
+        When inactive (paused), the thread sleeps in a tight 100 ms poll
+        loop and the physical webcam LED turns off. When active, the webcam
+        is opened and inference resumes immediately.
+
+        Args:
+            is_active: True to start capturing; False to pause and release camera.
+        """
+        if is_active:
+            logger.info("VisionPipeline: Resuming capture (webcam ON).")
+            self._pause_event.clear()   # clear = unpaused → capture loop runs
+        else:
+            logger.info("VisionPipeline: Pausing capture (webcam OFF).")
+            self._pause_event.set()     # set = paused → capture loop skips
+
     @property
     def is_running(self) -> bool:
         """True if the worker thread is alive and has not been asked to stop."""
