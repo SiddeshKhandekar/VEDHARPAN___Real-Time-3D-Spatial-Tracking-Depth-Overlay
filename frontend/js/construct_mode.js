@@ -285,22 +285,30 @@ export class ConstructMode {
     // ─── State: Drawing ───────────────────────────────────────────────────────
 
     _processRightHand(rightHand, gesture) {
-        const canDraw = this.state === STATES.DRAWING || this.state === STATES.IDLE;
-
         if (gesture === 'point' && rightHand && rightHand.index_tip) {
             if (this.pointsRemaining <= 0) return;
 
             // Transition to DRAWING on first point
             if (this.state === STATES.IDLE || this.state === STATES.OBJECT_READY) {
                 this.state = STATES.DRAWING;
+                this._updateHUD();
             }
 
             if (this.state === STATES.DRAWING) {
                 this._addStrokePoint(rightHand.index_tip);
             }
-        } else if (gesture !== 'point' && this._prevRightGesture === 'point') {
-            // Finger lifted — current stroke segment end
-            // (Next point gesture will start a new stroke or continue the path)
+        } else if (gesture === 'fist') {
+            // Right fist while HEAD_AIMING → switch to arrow-key PLACEMENT mode
+            if (this.state === STATES.HEAD_AIMING) {
+                this.state = STATES.PLACEMENT;
+                this._updateHUD();
+                console.log('[ConstructMode] STATE: PLACEMENT — use arrow keys to rotate, left fist to anchor');
+            }
+        } else if (gesture === 'open' && this.state === STATES.PLACEMENT) {
+            // Right open hand while PLACEMENT → return to HEAD_AIMING
+            this.state = STATES.HEAD_AIMING;
+            this._updateHUD();
+            console.log('[ConstructMode] STATE: HEAD_AIMING — restored from PLACEMENT');
         }
     }
 
@@ -349,6 +357,7 @@ export class ConstructMode {
             if (this._fistFrameCount >= FIST_CONFIRM_FRAMES) {
                 if (this.state === STATES.DRAWING) {
                     this.state = STATES.LOCKED;
+                    this._updateHUD();
                     console.log('[ConstructMode] Drawing LOCKED');
                 }
                 // In PLACEMENT state, fist-close triggers place
@@ -362,13 +371,14 @@ export class ConstructMode {
             // Fist → Open transition: convert stroke to 3D object
             if (prevGesture === 'fist' && gesture === 'open') {
                 if (this.state === STATES.LOCKED && this._strokePoints.length >= 3) {
-                    this._convertStrokeTo3D();
+                    this._convertStrokeTo3D();  // sets state to CONVERTING then OBJECT_READY
                 }
             }
 
             // Open hand while OBJECT_READY → go to HEAD_AIMING
             if (gesture === 'open' && this.state === STATES.OBJECT_READY) {
                 this.state = STATES.HEAD_AIMING;
+                this._updateHUD();
                 console.log('[ConstructMode] STATE: HEAD_AIMING');
             }
         }
@@ -689,7 +699,21 @@ export class ConstructMode {
 
     _updateHUD() {
         if (!this._hudPoints) return;
-        this._hudPoints.textContent = `POINTS: ${this.pointsRemaining}/${MAX_POINTS}`;
+        const stateLabels = {
+            [STATES.IDLE]: '✋ IDLE — Point right finger to draw',
+            [STATES.DRAWING]: '✏️ DRAWING — Left fist to lock',
+            [STATES.LOCKED]: '✊ LOCKED — Open left hand to extrude',
+            [STATES.CONVERTING]: '⚙️ CONVERTING...',
+            [STATES.OBJECT_READY]: '🟦 READY — Open left hand to aim',
+            [STATES.HEAD_AIMING]: '🎯 HEAD AIMING — Click to fire | Right fist to place',
+            [STATES.PLACEMENT]: '📐 PLACEMENT — Arrow keys rotate | Left fist to anchor',
+            [STATES.FIRED]: '🚀 FIRED',
+            [STATES.COOLDOWN]: '⏳ COOLDOWN — 5 min recharge',
+        };
+        const label = stateLabels[this.state] || this.state;
+        this._hudPoints.innerHTML =
+            `<span style="font-size:0.75rem;opacity:0.7">${label}</span>` +
+            `<br>POINTS: ${this.pointsRemaining}/${MAX_POINTS}`;
         this._hudPoints.classList.remove('hidden');
     }
 
