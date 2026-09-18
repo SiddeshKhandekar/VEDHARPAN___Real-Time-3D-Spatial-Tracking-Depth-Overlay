@@ -372,6 +372,9 @@ class VisionPipeline:
         self._face_mesh = None
         self._hands     = None
 
+        # Backend fist-hold tracker — used for the diagnostic progress bar
+        self._fist_start_ts: Optional[float] = None
+
     # ------------------------------------------------------------------
     # Public interface
     # ------------------------------------------------------------------
@@ -616,6 +619,16 @@ class VisionPipeline:
             # Reset unused EMAs
             for i in range(len(extracted_hands), len(self._hand_emas)):
                 self._hand_emas[i].reset()
+
+            # --- Update backend fist-hold debounce timer for debug bar ---
+            any_fist = any(
+                hand[2] == 'fist' for hand in extracted_hands
+            )
+            if any_fist:
+                if self._fist_start_ts is None:
+                    self._fist_start_ts = time.perf_counter()
+            else:
+                self._fist_start_ts = None
 
             # --- Base64 Debug Image for UI ---
             # Hand skeleton connection pairs (MediaPipe standard 21-node graph)

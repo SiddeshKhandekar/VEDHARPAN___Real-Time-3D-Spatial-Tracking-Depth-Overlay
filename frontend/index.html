@@ -375,11 +375,77 @@
         </div>
     </div>
 
-    <!-- Diagnostic base64 webcam debugger window -->
-    <div id="debug-stream-container" class="hidden">
-        <div class="stream-header">DIAGNOSTIC FEED</div>
-        <img id="debug-stream-feed" alt="Camera Feed Offline" />
+    <!-- Construct Mode Diagnostic Feed Panel (left side, shown only in Mode 4) -->
+    <div id="debug-stream-container" class="hidden" style="
+        position: fixed;
+        left: 14px;
+        bottom: 120px;
+        width: 340px;
+        background: rgba(0, 8, 20, 0.82);
+        border: 1px solid rgba(0, 242, 254, 0.35);
+        border-radius: 10px;
+        box-shadow: 0 0 18px rgba(0, 242, 254, 0.18), inset 0 0 40px rgba(0,0,0,0.6);
+        backdrop-filter: blur(10px);
+        pointer-events: none;
+        z-index: 8500;
+        overflow: hidden;
+        font-family: 'Orbitron', monospace;
+    ">
+        <!-- Title bar -->
+        <div style="
+            display: flex;
+            align-items: center;
+            gap: 7px;
+            padding: 7px 12px 5px;
+            border-bottom: 1px solid rgba(0,242,254,0.2);
+            background: rgba(0,242,254,0.06);
+        ">
+            <span style="
+                width: 8px; height: 8px;
+                border-radius: 50%;
+                background: #00f2fe;
+                box-shadow: 0 0 6px #00f2fe;
+                animation: pulse-dot 1.2s ease-in-out infinite;
+                flex-shrink: 0;
+            "></span>
+            <span style="
+                color: #00f2fe;
+                font-size: 0.58rem;
+                letter-spacing: 2px;
+                text-shadow: 0 0 8px #00f2fe;
+            ">CONSTRUCT DIAGNOSTIC FEED</span>
+        </div>
+        <!-- Annotated camera image -->
+        <img id="debug-stream-feed" alt="Camera Feed Offline" style="
+                 display: block;
+                 width: 100%;
+                 height: auto;
+                 image-rendering: pixelated;
+             " />
+        <!-- Sub-label -->
+        <div style="
+            padding: 4px 10px;
+            font-size: 0.48rem;
+            color: rgba(0,242,254,0.5);
+            letter-spacing: 1.5px;
+            border-top: 1px solid rgba(0,242,254,0.12);
+        ">HAND SKELETON · GESTURE LABELS · INDEX TIP</div>
     </div>
+    <style>
+        @keyframes pulse-dot {
+
+            0%,
+            100% {
+                opacity: 1;
+                box-shadow: 0 0 6px #00f2fe;
+            }
+
+            50% {
+                opacity: 0.4;
+                box-shadow: 0 0 2px #00f2fe;
+            }
+        }
+    </style>
 
     <!-- Ammo Meters Panel (bottom-right) -->
     <div id="ammo-meters">
