@@ -779,7 +779,7 @@ class DioramaScene {
      * Initialise the ConstructMode (Mode 4) system.
      */
     initConstructMode() {
-        this.constructMode = new ConstructMode(this.scene, this.physicsWorld, this.camera);
+        this.constructMode = new ConstructMode(this.scene, this.physicsWorld, this.camera, this.inputManager);
     }
 
     /**

@@ -67,12 +67,16 @@ logger = logging.getLogger(__name__)
 # Webcam device index.  0 = system default camera.
 DEFAULT_CAMERA_INDEX: int = 0
 
-# Target capture resolution. 1280×720 is a common 60 fps-capable resolution.
-CAPTURE_WIDTH: int  = 1280
-CAPTURE_HEIGHT: int = 720
+# Target capture resolution.
+# 320×240 feeds MediaPipe 15× less pixel data vs 1280×720, achieving 20–30 FPS
+# on CPU. MediaPipe internally downscales to 192×192 anyway, so higher input
+# resolution adds only CPU overhead with zero inference accuracy benefit.
+CAPTURE_WIDTH: int  = 320
+CAPTURE_HEIGHT: int = 240
 
-# Camera's physical capture frame-rate request. The OS may clamp this.
-CAPTURE_FPS: int = 60
+# Camera physical capture frame-rate. 30 FPS matches common webcam capability
+# at low resolutions and prevents MediaPipe from queuing stale frames.
+CAPTURE_FPS: int = 30
 
 # EMA smoothing coefficients (α).  Lower = smoother but slower to respond.
 EMA_ALPHA_HEAD: float = 0.15   # Prioritises camera-perspective stability
@@ -614,31 +618,76 @@ class VisionPipeline:
                 self._hand_emas[i].reset()
 
             # --- Base64 Debug Image for UI ---
+            # Hand skeleton connection pairs (MediaPipe standard 21-node graph)
+            _HAND_CONNECTIONS = [
+                (0,1),(1,2),(2,3),(3,4),           # thumb
+                (0,5),(5,6),(6,7),(7,8),            # index
+                (0,9),(9,10),(10,11),(11,12),       # middle
+                (0,13),(13,14),(14,15),(15,16),     # ring
+                (0,17),(17,18),(18,19),(19,20),     # pinky
+                (5,9),(9,13),(13,17),               # palm cross-links
+            ]
+
             debug_base64: Optional[str] = None
             try:
-                # Downscale heavily to 320x180 to save websocket bandwidth
-                debug_img = cv2.resize(bgr_frame, (320, 180), interpolation=cv2.INTER_AREA)
-                # Mirror to align with the normalized spatial output chirality
-                debug_img = cv2.flip(debug_img, 1)
+                # Mirror the raw frame so left/right matches the user's expectation
+                debug_img = cv2.flip(bgr_frame, 1)
+                debug_h, debug_w = debug_img.shape[:2]
 
-                # Draw endpoints and index tip
-                for i, hand in enumerate(extracted_hands):
-                    landmarks = hand[1]
-                    if landmarks is not None and len(landmarks) >= 21:
-                        # Draw full skeleton points
-                        for lm in landmarks:
-                            px = int((lm["x"] + 1.0) / 2.0 * 320)
-                            py = int((1.0 - lm["y"]) / 2.0 * 180)
-                            cv2.circle(debug_img, (px, py), 2, (0, 255, 0), -1)
+                # Overlay each detected hand
+                for hand_idx, raw_lm_list in enumerate(hand_results.hand_landmarks):
+                    # raw_lm_list is List[NormalizedLandmark]; .x/.y are in [0, 1]
+                    # After mirror flip, the correct pixel x = (1 - lm.x) * w
+                    def lm_px(lm):
+                        return (int((1.0 - lm.x) * debug_w), int(lm.y * debug_h))
 
-                        # Highlight index tip (index 8)
-                        index_lm = landmarks[8]
-                        ix = int((index_lm["x"] + 1.0) / 2.0 * 320)
-                        iy = int((1.0 - index_lm["y"]) / 2.0 * 180)
-                        cv2.circle(debug_img, (ix, iy), 5, (0, 0, 255), -1)
-                        cv2.putText(debug_img, f"PTR {i}", (ix+5, iy-5), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0,0,255), 1)
-                        
-                _, buffer = cv2.imencode('.jpg', debug_img, [cv2.IMWRITE_JPEG_QUALITY, 50])
+                    pts = [lm_px(lm) for lm in raw_lm_list]
+
+                    # Draw skeleton connections
+                    for (a, b) in _HAND_CONNECTIONS:
+                        cv2.line(debug_img, pts[a], pts[b], (0, 200, 200), 1)
+
+                    # Draw all 21 joint dots
+                    for pt in pts:
+                        cv2.circle(debug_img, pt, 3, (0, 255, 100), -1)
+
+                    # Highlight index fingertip (landmark 8) in bold red
+                    ix, iy = pts[8]
+                    cv2.circle(debug_img, (ix, iy), 7, (0, 0, 255), -1)
+                    cv2.putText(debug_img, "INDEX", (ix + 6, iy - 6),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.38, (0, 80, 255), 1)
+
+                    # Gesture label + handedness above wrist
+                    wx, wy = pts[0]
+                    gesture_str = "none"
+                    handedness_str = "?"
+                    if hand_idx < len(extracted_hands):
+                        gesture_str    = extracted_hands[hand_idx][2] or "none"
+                        handedness_str = extracted_hands[hand_idx][3] or "?"
+
+                    label = f"{handedness_str[0].upper()}  {gesture_str.upper()}"
+                    cv2.putText(debug_img, label, (wx - 30, wy - 12),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 1)
+
+                    # Fist-hold progress bar (400ms debounce window)
+                    if hasattr(self, '_fist_start_ts') and self._fist_start_ts and gesture_str == 'fist':
+                        import time as _time
+                        held_ms = (_time.perf_counter() - self._fist_start_ts) * 1000
+                        ratio   = min(1.0, held_ms / 400.0)
+                        bar_w   = int(60 * ratio)
+                        bar_x   = max(0, wx - 30)
+                        bar_y   = wy - 4
+                        cv2.rectangle(debug_img, (bar_x, bar_y), (bar_x + 60, bar_y + 5),
+                                      (50, 50, 50), -1)
+                        cv2.rectangle(debug_img, (bar_x, bar_y), (bar_x + bar_w, bar_y + 5),
+                                      (0, 220, 255), -1)
+
+                # Status strip at top-left
+                status_txt = f"Hands: {len(hand_results.hand_landmarks)}"
+                cv2.putText(debug_img, status_txt, (6, 14),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.45, (200, 200, 200), 1)
+
+                _, buffer = cv2.imencode('.jpg', debug_img, [cv2.IMWRITE_JPEG_QUALITY, 65])
                 debug_base64 = base64.b64encode(buffer).decode('utf-8')
             except Exception as e:
                 logger.warning("VisionPipeline: Failed to encode debug image - %s", e)
