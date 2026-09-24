@@ -751,14 +751,6 @@ class VisionPipeline:
         If no face is detected, returns the last valid vector (via EMA state)
         by returning the zero-centred origin vector, which will be pulled
         toward the current EMA state by the low alpha coefficient.
-
-        Args:
-            face_results: The output of self._face_mesh.process().
-            frame_width:  Pixel width of the current frame.
-            frame_height: Pixel height of the current frame.
-
-        Returns:
-            A raw SpatialVector for the head position.
         """
         if not face_results.face_landmarks:
             self._head_ema.reset()
@@ -786,7 +778,7 @@ class VisionPipeline:
             right_iris_lm.y * frame_height,
         )
 
-        # Midpoint of the two irises → horizontal/vertical gaze centre.
+        # Midpoint of the two irises -> horizontal/vertical gaze centre.
         mid_x = (left_iris[0] + right_iris[0]) / 2.0
         mid_y = (left_iris[1] + right_iris[1]) / 2.0
 
@@ -796,77 +788,76 @@ class VisionPipeline:
         return SpatialVector(x=norm_x, y=norm_y, z=norm_z)
 
     def _classify_gesture(self, landmarks) -> str:
-        """Classify a hand gesture from MediaPipe landmarks.
+        """Classify a hand gesture from MediaPipe hand landmarks.
 
-        Detects four gesture states for the Construct (Mode 4) system:
-            - "fist"  : All fingers curled toward palm (trigger lock-drawing).
-            - "open"  : All five fingers extended (trigger 3D conversion).
-            - "point" : Only index finger extended (drawing mode).
-            - "none"  : Default fallback.
+        Detects four gesture states for Construct (Mode 4):
+            fist  : 3 of 4 non-thumb fingers clearly curled (majority vote).
+            open  : all 4 non-thumb fingers clearly extended.
+            point : only index finger extended, others curled.
+            none  : default / transitional fallback.
 
-        Fist Detection Strategy (robust to camera angle):
-            Uses a two-condition check per finger:
-              1. Tip is close to wrist (distance check, same as before).
-              2. Tip Y-coordinate is BELOW (greater in image space) the PIP
-                 (proximal inter-phalangeal / middle knuckle) joint.
-            Condition 2 makes the fist check camera-angle-invariant because
-            a folded finger tip always sits below its own middle knuckle
-            regardless of wrist rotation toward/away from the lens.
+        Each finger is checked with three independent conditions so a single
+        borderline reading cannot break the whole gesture.
         """
-        # Landmark indices
-        THUMB_TIP  = 4;  THUMB_IP  = 3
-        INDEX_TIP  = 8;  INDEX_MCP  = 5;  INDEX_PIP  = 6
-        MIDDLE_TIP = 12; MIDDLE_MCP = 9;  MIDDLE_PIP = 10
-        RING_TIP   = 16; RING_MCP   = 13; RING_PIP   = 14
-        PINKY_TIP  = 20; PINKY_MCP  = 17; PINKY_PIP  = 18
+        # ── Landmark indices ───────────────────────────────────────────────
+        THUMB_TIP  = 4;  THUMB_MCP  = 2
+        INDEX_TIP  = 8;  INDEX_PIP  = 6;  INDEX_MCP  = 5
+        MIDDLE_TIP = 12; MIDDLE_PIP = 10; MIDDLE_MCP = 9
+        RING_TIP   = 16; RING_PIP   = 14; RING_MCP   = 13
+        PINKY_TIP  = 20; PINKY_PIP  = 18; PINKY_MCP  = 17
         WRIST      = 0
-        PALM_CENTER = 9
 
-        def dist2d(a, b):
-            return ((landmarks[a].x - landmarks[b].x)**2 +
-                    (landmarks[a].y - landmarks[b].y)**2) ** 0.5
+        def d2(a, b):
+            dx = landmarks[a].x - landmarks[b].x
+            dy = landmarks[a].y - landmarks[b].y
+            return (dx*dx + dy*dy) ** 0.5
 
-        # ── Extension check (tip further from wrist than MCP) ─────────────────
-        def is_extended(tip_idx, mcp_idx):
-            return dist2d(tip_idx, WRIST) > dist2d(mcp_idx, WRIST) + 0.02
+        def is_curled(tip, pip, mcp):
+            # 1. Tip clearly below its own knuckle (MCP) in image space
+            below_mcp  = landmarks[tip].y > landmarks[mcp].y + 0.04
+            # 2. Tip at or below its PIP knuckle
+            below_pip  = landmarks[tip].y > landmarks[pip].y - 0.01
+            # 3. Tip closer to wrist than MCP (with generous tolerance)
+            near_wrist = d2(tip, WRIST) < d2(mcp, WRIST) + 0.07
+            return below_mcp and below_pip and near_wrist
 
-        # ── Fist-finger check (two-condition: near wrist + folded below PIP) ──
-        def is_fist_finger(tip_idx, pip_idx, mcp_idx):
-            tip_near_wrist = dist2d(tip_idx, WRIST) < dist2d(mcp_idx, WRIST) + 0.03
-            tip_below_pip  = landmarks[tip_idx].y > landmarks[pip_idx].y - 0.01
-            return tip_near_wrist and tip_below_pip
+        def is_extended(tip, mcp):
+            return d2(tip, WRIST) > d2(mcp, WRIST) + 0.025
 
-        index_ext  = is_extended(INDEX_TIP,  INDEX_MCP)
-        middle_ext = is_extended(MIDDLE_TIP, MIDDLE_MCP)
-        ring_ext   = is_extended(RING_TIP,   RING_MCP)
-        pinky_ext  = is_extended(PINKY_TIP,  PINKY_MCP)
+        # Thumb: tip near index MCP (cross-palm) = curled/tucked
+        thumb_curled   = d2(THUMB_TIP, INDEX_MCP) < 0.15
+        thumb_extended = d2(THUMB_TIP, WRIST) > d2(THUMB_MCP, WRIST) + 0.02
 
-        index_fist  = is_fist_finger(INDEX_TIP,  INDEX_PIP,  INDEX_MCP)
-        middle_fist = is_fist_finger(MIDDLE_TIP, MIDDLE_PIP, MIDDLE_MCP)
-        ring_fist   = is_fist_finger(RING_TIP,   RING_PIP,   RING_MCP)
-        pinky_fist  = is_fist_finger(PINKY_TIP,  PINKY_PIP,  PINKY_MCP)
+        curled = [
+            is_curled(INDEX_TIP,  INDEX_PIP,  INDEX_MCP),
+            is_curled(MIDDLE_TIP, MIDDLE_PIP, MIDDLE_MCP),
+            is_curled(RING_TIP,   RING_PIP,   RING_MCP),
+            is_curled(PINKY_TIP,  PINKY_PIP,  PINKY_MCP),
+        ]
+        extended = [
+            is_extended(INDEX_TIP,  INDEX_MCP),
+            is_extended(MIDDLE_TIP, MIDDLE_MCP),
+            is_extended(RING_TIP,   RING_MCP),
+            is_extended(PINKY_TIP,  PINKY_MCP),
+        ]
 
-        # Thumb curl: tip closer to palm center than to its IP joint
-        thumb_to_palm = ((landmarks[THUMB_TIP].x - landmarks[PALM_CENTER].x)**2 +
-                         (landmarks[THUMB_TIP].y - landmarks[PALM_CENTER].y)**2)**0.5
-        thumb_to_ip   = ((landmarks[THUMB_TIP].x - landmarks[THUMB_IP].x)**2 +
-                         (landmarks[THUMB_TIP].y - landmarks[THUMB_IP].y)**2)**0.5
-        thumb_curled = thumb_to_palm < thumb_to_ip
+        n_curled   = sum(curled)
+        n_extended = sum(extended)
 
-        # --- FIST: all 4 fingers folded (PIP+distance) + thumb curled --------
-        if index_fist and middle_fist and ring_fist and pinky_fist and thumb_curled:
+        # FIST: at least 3 of 4 fingers clearly curled
+        if n_curled >= 3:
             return "fist"
 
-        # --- OPEN: all 5 fingers extended ------------------------------------
-        thumb_ext = not thumb_curled
-        if index_ext and middle_ext and ring_ext and pinky_ext and thumb_ext:
+        # OPEN: all 4 non-thumb fingers clearly extended
+        if n_extended == 4 and thumb_extended:
             return "open"
 
-        # --- POINT: only index extended, others NOT extended -----------------
-        if index_ext and not middle_ext and not ring_ext and not pinky_ext:
+        # POINT: index extended, middle and ring curled
+        if extended[0] and curled[1] and curled[2]:
             return "point"
 
         return "none"
+
 
     def _extract_hands(
         self,
