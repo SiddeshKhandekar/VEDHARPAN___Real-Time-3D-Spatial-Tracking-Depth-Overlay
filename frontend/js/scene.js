@@ -148,13 +148,6 @@ class DioramaScene {
 
         // 6.5 Mode 4 Construct Mode (requires physicsWorld to be ready)
         this.initConstructMode();
-        // Give ConstructMode a live callback to set scene.orbitYaw/Pitch
-        this.constructMode.bindOrbitSetters(
-            (v) => { this.orbitYaw = v; },
-            (v) => { this.orbitPitch = Math.max(-1.2, Math.min(1.2, v)); },
-            () => this.orbitYaw,
-            () => this.orbitPitch
-        );
 
         // 7. Load Assets (Blocks rendering specifically until finished via the callback)
         this.loadAssets(() => {
