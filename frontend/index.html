@@ -72,49 +72,23 @@
         <div class="game-hud-item">&#x1F3C6; <span id="score">0</span></div>
     </div>
 
-    <!-- Construct Mode Drawing Budget HUD -->
-    <div id="construct-points" class="hidden"
-        style="position:fixed;bottom:24px;left:24px;font-family:'Orbitron',monospace;color:#00f2fe;font-size:0.9rem;font-weight:bold;text-shadow:0 0 8px #00f2fe;pointer-events:none;z-index:9000;letter-spacing:2px;background:rgba(0,0,0,0.55);padding:6px 14px;border-radius:6px;border:1px solid rgba(0,242,254,0.35);">
-        POINTS: 100/100</div>
-
-    <!-- Construct Mode Force Meter (charge-hold-release fire indicator) -->
-    <div id="force-meter-wrap" class="hidden" style="
+    <!-- Hand Gesture Status Strip (Mode 4 only) -->
+    <div id="hand-gesture-hud" class="hidden" style="
         position:fixed;
-        right:28px;
-        bottom:80px;
-        width:18px;
-        height:160px;
-        background:rgba(0,0,0,0.55);
-        border:1px solid rgba(0,242,254,0.4);
-        border-radius:9px;
-        overflow:hidden;
+        top:20px;
+        left:50%;
+        transform:translateX(-50%);
         display:flex;
-        flex-direction:column-reverse;
-        align-items:center;
-        pointer-events:none;
-        z-index:9001;
-    ">
-        <div id="force-meter-fill" style="
-            width:100%;
-            height:0%;
-            background:#00f2fe;
-            border-radius:9px;
-            transition:height 0.04s linear;
-            box-shadow:0 0 8px rgba(0,242,254,0.8);
-        "></div>
-    </div>
-    <div id="force-meter-label" class="hidden" style="
-        position:fixed;
-        right:20px;
-        bottom:52px;
+        gap:24px;
         font-family:'Orbitron',monospace;
-        font-size:0.6rem;
-        color:#00f2fe;
+        font-size:0.7rem;
         letter-spacing:2px;
         pointer-events:none;
-        z-index:9001;
-        text-shadow:0 0 6px #00f2fe;
-    ">FORCE</div>
+        z-index:9002;
+    ">
+        <span id="gesture-left" style="color:#00f2fe;text-shadow:0 0 8px #00f2fe">LEFT: —</span>
+        <span id="gesture-right" style="color:#00f2fe;text-shadow:0 0 8px #00f2fe">RIGHT: —</span>
+    </div>
 
     <!-- Crosshair -->
     <div id="crosshair"></div>

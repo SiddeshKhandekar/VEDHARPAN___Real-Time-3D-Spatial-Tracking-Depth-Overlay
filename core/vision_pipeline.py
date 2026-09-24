@@ -375,6 +375,14 @@ class VisionPipeline:
         # Backend fist-hold tracker — used for the diagnostic progress bar
         self._fist_start_ts: Optional[float] = None
 
+        # Wrist position ring-buffer for palm_velocity computation.
+        # Stores last 3 wrist positions per hand index: {0: deque, 1: deque}
+        from collections import deque
+        self._wrist_pos_buf: Dict[int, Any] = {
+            0: deque(maxlen=3),
+            1: deque(maxlen=3),
+        }
+
     # ------------------------------------------------------------------
     # Public interface
     # ------------------------------------------------------------------
@@ -603,18 +611,16 @@ class VisionPipeline:
             smooth_head = self._head_ema.update(raw_head)
             
             smooth_hands = []
-            for i, (raw_hand_center, raw_landmarks, gesture, handedness, index_tip) in enumerate(extracted_hands):
+            for i, (raw_hand_center, raw_landmarks, gesture, handedness, palm_velocity) in enumerate(extracted_hands):
                 if i < len(self._hand_emas):
                     smooth_center = self._hand_emas[i].update(raw_hand_center)
-                    hand_entry = {
-                        "center": smooth_center,
-                        "landmarks": raw_landmarks,
-                        "gesture": gesture,
-                        "handedness": handedness,
-                    }
-                    if index_tip is not None:
-                        hand_entry["index_tip"] = index_tip
-                    smooth_hands.append(hand_entry)
+                    smooth_hands.append({
+                        "center":       smooth_center,
+                        "landmarks":    raw_landmarks,
+                        "gesture":      gesture,
+                        "handedness":   handedness,
+                        "palm_velocity": palm_velocity,
+                    })
             
             # Reset unused EMAs
             for i in range(len(extracted_hands), len(self._hand_emas)):
@@ -919,28 +925,26 @@ class VisionPipeline:
 
             gesture = self._classify_gesture(hand_landmark_list)
 
-            # --- Index fingertip for 3D drawing (only when pointing) ---
-            index_tip_data = None
-            if gesture == "point":
-                idx_lm = hand_landmark_list[8]  # INDEX_FINGER_TIP
-                mirrored_idx_x = (1.0 - idx_lm.x) * frame_width
-                itx, ity = _normalise_pixel(
-                    mirrored_idx_x, idx_lm.y * frame_height,
-                    frame_width, frame_height,
-                )
-                itz = float(np.clip(idx_lm.z * 5.0, -1.0, 1.0))
-                index_tip_data = {
-                    "x": round(itx, 5),
-                    "y": round(ity, 5),
-                    "z": round(itz, 5),
-                }
+            # --- Palm velocity (3-frame wrist delta for throw impulse) ---
+            wrist_now = (norm_x, norm_y, norm_z)
+            buf = self._wrist_pos_buf.get(hand_idx)
+            palm_velocity = [0.0, 0.0, 0.0]
+            if buf is not None:
+                buf.append(wrist_now)
+                if len(buf) >= 2:
+                    dx = buf[-1][0] - buf[-2][0]
+                    dy = buf[-1][1] - buf[-2][1]
+                    dz = buf[-1][2] - buf[-2][2]
+                    palm_velocity = [round(dx * 30, 4),   # scale to per-second
+                                     round(dy * 30, 4),
+                                     round(dz * 30, 4)]
 
             hands_data.append((
                 SpatialVector(x=norm_x, y=norm_y, z=norm_z),
                 all_landmarks,
                 gesture,
                 handedness_label,
-                index_tip_data,
+                palm_velocity,
             ))
 
         return hands_data
