@@ -28,8 +28,6 @@ const PARALLAX_SENSITIVITY_Y = 1.8; // Controls camera Y-translation
 const FRUSTUM_WARP_SENSITIVITY_X = 180; // Frustum offset in pixels
 const FRUSTUM_WARP_SENSITIVITY_Y = 120; // Frustum offset in pixels
 
-// Drawing plane depth (distance in front of mecha for 3D strokes)
-const CONSTRUCT_DRAW_DEPTH = 2.0;
 
 class DioramaScene {
     constructor() {
@@ -779,7 +777,12 @@ class DioramaScene {
      * Initialise the ConstructMode (Mode 4) system.
      */
     initConstructMode() {
-        this.constructMode = new ConstructMode(this.scene, this.physicsWorld, this.camera, this.inputManager);
+        // Pass the raw CANNON.World and dynamic body pairs (used by HandPhysics for grab/throw)
+        this.constructMode = new ConstructMode(
+            this.scene,
+            this.physicsWorld.world,
+            this.physicsWorld.dynamicBodies,
+        );
     }
 
     /**
@@ -1550,8 +1553,8 @@ class DioramaScene {
                     this.hudHand.textContent = `${data.hands.length} detected`;
 
                     // Route new telemetry to ConstructMode (Mode 4)
-                    if (this.constructMode) {
-                        this.constructMode.onTelemetry(data.hands, data.head);
+                    if (this.constructMode?.isActive) {
+                        this.constructMode.update({ hands: data.hands, head: data.head });
                     }
 
                     if (this.inputManager && data.hands.length > 0) {
