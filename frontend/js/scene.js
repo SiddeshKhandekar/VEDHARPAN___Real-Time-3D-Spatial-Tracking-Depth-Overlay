@@ -411,7 +411,9 @@ class DioramaScene {
             } else {
                 m.card.classList.remove('cooling');
                 m.fill.style.width = `${max > 0 ? (rounds / max) * 100 : 100}%`;
-                m.count.textContent = `${rounds}/${max}`;
+                // Mode 4 (Physical Hands) — no ammo concept, display infinity symbol
+                m.count.textContent = (mode === 4) ? '∞' : `${rounds}/${max}`;
+
             }
         }
 
