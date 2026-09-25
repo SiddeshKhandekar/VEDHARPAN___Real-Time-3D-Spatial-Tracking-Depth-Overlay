@@ -440,6 +440,7 @@ class DioramaScene {
                         this.cameraMode = 1;  // Third Person orbit
                         if (this.hudCameraMode) this.hudCameraMode.textContent = this.cameraModeNames[this.cameraMode];
                     }
+                    this.constructMode.setMechaWrapper(this.mechaWrapper);
                     this.constructMode.activate();
                     this.setWebcamActive(true);
                 } else {
@@ -770,11 +771,14 @@ class DioramaScene {
      * Initialise the ConstructMode (Mode 4) system.
      */
     initConstructMode() {
-        // Pass the raw CANNON.World and dynamic body pairs (used by HandPhysics for grab/throw)
+        // Pass the raw CANNON.World, dynamic body pairs, and camera.
+        // mechaWrapper is injected lazily via setMechaWrapper() when Mode 4 first activates
+        // (because mechaWrapper does not exist until the GLTF load completes).
         this.constructMode = new ConstructMode(
             this.scene,
             this.physicsWorld.world,
             this.physicsWorld.dynamicBodies,
+            this.camera,
         );
     }
 

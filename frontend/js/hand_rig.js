@@ -1,144 +1,218 @@
 /**
- * hand_rig.js — Live 3D hand renderer for Mode 4 (Catch & Throw).
+ * hand_rig.js  —  Mecha Physical Hands (Mode 4)
  *
- * Renders one hand as:
- *   • 21 joint spheres  — InstancedMesh (single draw call)
- *   • 20 bone segments  — LineSegments with BufferGeometry (in-place update)
- *   • Invisible grab sphere centred on the palm (landmark 0)
+ * Creates two full 3D mecha arms anchored to the mechaWrapper.
+ * Each arm = shoulder pivot → forearm tube → palm block → 4 finger chains (3 segments each).
  *
- * Usage:
- *   const rig = new HandRig(scene);
- *   rig.update(handData);   // handData = hand entry from WS payload
- *   rig.setVisible(bool);
- *   rig.dispose();
+ * Gesture input drives finger curl animation.
+ * Wrist X/Y landmark data swings the arm laterally/vertically within reach bounds.
+ * No landmark-to-world-space mapping — all positions are relative to mechaWrapper.
  */
 
 import * as THREE from 'three';
 
-// MediaPipe 21-joint connection pairs (standard graph)
-const CONNECTIONS = [
-    [0, 1], [1, 2], [2, 3], [3, 4],
-    [0, 5], [5, 6], [6, 7], [7, 8],
-    [0, 9], [9, 10], [10, 11], [11, 12],
-    [0, 13], [13, 14], [14, 15], [15, 16],
-    [0, 17], [17, 18], [18, 19], [19, 20],
-    [5, 9], [9, 13], [13, 17],
-];
-const N_JOINTS = 21;
-const N_BONES = CONNECTIONS.length;
+// ─── Constants ────────────────────────────────────────────────────────────────
 
-// EMA helper — one instance per axis per landmark (21 × 3 = 63 per hand)
+// Side 'left' = -1, 'right' = +1
+const SHOULDER_OFFSET = { x: 1.8, y: 0.6, z: 0.2 };  // from mechaWrapper origin
+const ARM_REACH_Z = 1.5;   // how far forward the idle arm extends (Z toward camera)
+const SWAY_X = 1.2;   // max lateral sway driven by landmark X
+const SWAY_Y = 0.8;   // max vertical sway driven by landmark Y
+
+// Geometry sizes
+const ARM_TUBE_RADIUS = 0.09;
+const ARM_TUBE_LENGTH = 0.9;
+const PALM_W = 0.30, PALM_H = 0.12, PALM_D = 0.36;
+const FINGER_W = 0.055, FINGER_H = 0.055, FINGER_L = 0.20;
+const KNUCKLE_GAP = 0.09;   // lateral gap between finger bases
+
+// Curl angles (radians) per segment per gesture
+const CURL = {
+    fist: [Math.PI * 0.45, Math.PI * 0.40, Math.PI * 0.35],
+    open: [0, 0, 0],
+    none: [Math.PI * 0.15, Math.PI * 0.10, Math.PI * 0.05],
+};
+
+// Visual style
+const MAT_ARM = new THREE.MeshStandardMaterial({ color: 0x1a2a3a, metalness: 0.9, roughness: 0.3, emissive: 0x001020, emissiveIntensity: 0.4 });
+const MAT_TRIM = new THREE.MeshStandardMaterial({ color: 0x00e5ff, metalness: 0.6, roughness: 0.2, emissive: 0x00a0c0, emissiveIntensity: 0.8 });
+
+// Simple EMA filter
 class EMA {
-    constructor(alpha = 0.25) { this.a = alpha; this.v = null; }
+    constructor(a = 0.18) { this.a = a; this.v = null; }
     update(x) { this.v = this.v === null ? x : this.a * x + (1 - this.a) * this.v; return this.v; }
     reset() { this.v = null; }
 }
 
-const COLORS = {
-    fist: new THREE.Color(1.0, 0.45, 0.1),
-    open: new THREE.Color(0.0, 0.95, 1.0),
-    none: new THREE.Color(0.4, 0.4, 0.9),
-};
+// ─── HandRig ──────────────────────────────────────────────────────────────────
 
 export class HandRig {
     /**
-     * @param {THREE.Scene} scene
-     * @param {number}  worldScale  - multiplier mapping normalised [-1,1] coords to world units
+     * @param {THREE.Scene}    scene
+     * @param {THREE.Object3D} mechaWrapper   — the unscaled mecha root from scene.js
+     * @param {'left'|'right'} side
      */
-    constructor(scene, worldScale = 4.0) {
+    constructor(scene, mechaWrapper, side) {
         this._scene = scene;
-        this._scale = worldScale;
-
-        // EMA filters: 21 landmarks × {x,y,z}
-        this._ema = Array.from({ length: N_JOINTS }, () => ({
-            x: new EMA(), y: new EMA(), z: new EMA(),
-        }));
-
-        // Joint spheres — InstancedMesh
-        const jGeo = new THREE.SphereGeometry(0.045, 6, 6);
-        const jMat = new THREE.MeshBasicMaterial({ color: COLORS.none });
-        this._joints = new THREE.InstancedMesh(jGeo, jMat, N_JOINTS);
-        this._joints.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-        scene.add(this._joints);
-
-        // Bone lines — LineSegments (2 vertices per connection)
-        const bGeo = new THREE.BufferGeometry();
-        const bPos = new Float32Array(N_BONES * 2 * 3); // 2 endpoints × xyz
-        bGeo.setAttribute('position', new THREE.BufferAttribute(bPos, 3));
-        bGeo.getAttribute('position').setUsage(THREE.DynamicDrawUsage);
-        const bMat = new THREE.LineBasicMaterial({ color: 0x00d4ff, transparent: true, opacity: 0.7 });
-        this._bones = new THREE.LineSegments(bGeo, bMat);
-        this._bonePos = bPos;
-        scene.add(this._bones);
-
-        // Grab sphere (invisible, used by HandPhysics for proximity checks)
-        this.grabSphere = new THREE.Mesh(
-            new THREE.SphereGeometry(0.35, 6, 6),
-            new THREE.MeshBasicMaterial({ visible: false }),
-        );
-        this.grabSphere.position.set(0, -100, 0); // off-screen until first update
-        scene.add(this.grabSphere);
-
-        this._dummy = new THREE.Object3D();
-        this._positions = new Array(N_JOINTS).fill(null).map(() => new THREE.Vector3());
-        this._visible = true;
+        this._mecha = mechaWrapper;
+        this._side = side;
+        this._sign = side === 'left' ? -1 : 1;
         this._gesture = 'none';
+
+        // EMA for wrist sway
+        this._emaX = new EMA();
+        this._emaY = new EMA();
+
+        // ── Shoulder pivot (all geometry hangs from here) ──────────────────────
+        this.root = new THREE.Object3D();
+        this.root.position.set(
+            this._sign * SHOULDER_OFFSET.x,
+            SHOULDER_OFFSET.y,
+            SHOULDER_OFFSET.z,
+        );
+        mechaWrapper.add(this.root);
+
+        // ── Forearm tube ───────────────────────────────────────────────────────
+        const armGeo = new THREE.CylinderGeometry(ARM_TUBE_RADIUS, ARM_TUBE_RADIUS * 1.2, ARM_TUBE_LENGTH, 8);
+        armGeo.rotateX(Math.PI / 2);
+        this._armMesh = new THREE.Mesh(armGeo, MAT_ARM.clone());
+        this._armMesh.position.set(0, 0, ARM_REACH_Z - ARM_TUBE_LENGTH * 0.5);
+        this.root.add(this._armMesh);
+
+        // Cyan wristband trim ring
+        const ringGeo = new THREE.TorusGeometry(ARM_TUBE_RADIUS * 1.4, 0.018, 6, 16);
+        const ring = new THREE.Mesh(ringGeo, MAT_TRIM.clone());
+        ring.rotation.x = Math.PI / 2;
+        ring.position.set(0, 0, ARM_REACH_Z - ARM_TUBE_LENGTH + 0.05);
+        this.root.add(ring);
+
+        // ── Palm block ─────────────────────────────────────────────────────────
+        this._palmPivot = new THREE.Object3D();
+        this._palmPivot.position.set(0, 0, ARM_REACH_Z);
+        this.root.add(this._palmPivot);
+
+        const palmGeo = new THREE.BoxGeometry(PALM_W, PALM_H, PALM_D);
+        this._palmMesh = new THREE.Mesh(palmGeo, MAT_ARM.clone());
+        this._palmPivot.add(this._palmMesh);
+
+        // Knuckle trim strip along front of palm
+        const knuckleGeo = new THREE.BoxGeometry(PALM_W * 0.9, 0.025, 0.04);
+        const knuckleTrim = new THREE.Mesh(knuckleGeo, MAT_TRIM.clone());
+        knuckleTrim.position.set(0, PALM_H * 0.5, -PALM_D * 0.5 + 0.02);
+        this._palmPivot.add(knuckleTrim);
+
+        // ── Finger chains (4 fingers, 3 segments each) ────────────────────────
+        this._fingers = [];
+        const fingerXOffsets = [-0.105, -0.035, 0.035, 0.105];
+
+        for (let f = 0; f < 4; f++) {
+            const chain = [];
+            let parent = this._palmPivot;
+            let zBase = -PALM_D * 0.5;   // start at front edge of palm
+
+            for (let s = 0; s < 3; s++) {
+                const pivot = new THREE.Object3D();
+                pivot.position.set(f === 0 ? fingerXOffsets[f] : 0, 0, s === 0 ? zBase : -FINGER_L);
+                parent.add(pivot);
+
+                const geo = new THREE.BoxGeometry(FINGER_W, FINGER_H, FINGER_L);
+                const mesh = new THREE.Mesh(geo, s === 0 ? MAT_ARM.clone() : MAT_ARM.clone());
+                mesh.position.set(0, 0, -FINGER_L * 0.5);
+                pivot.add(mesh);
+
+                // Cyan joint dot at segment root
+                const dotGeo = new THREE.BoxGeometry(FINGER_W * 1.1, FINGER_H * 1.1, 0.025);
+                const dot = new THREE.Mesh(dotGeo, MAT_TRIM.clone());
+                pivot.add(dot);
+
+                chain.push(pivot);
+                parent = pivot;
+            }
+
+            // Position each finger correctly at f=0 and from finger root for others
+            this._fingers.push(chain);
+        }
+
+        // Reposition each finger base X on the palm
+        for (let f = 0; f < 4; f++) {
+            this._fingers[f][0].position.x = fingerXOffsets[f];
+        }
+
+        // ── Public grab sphere position (align with palm centre) ──────────────
+        // Used by HandPhysics without being rendered
+        this.grabPoint = new THREE.Object3D();
+        this._palmPivot.add(this.grabPoint);
+        this.grabPoint.position.set(0, 0, -PALM_D * 0.4);
+
+        this._visible = true;
+        this._curGesture = 'none';
     }
 
-    /** Called every frame with the hand entry from the WS payload. */
+    /**
+     * Call every frame with the hand entry from the WS payload (or null).
+     * @param {object|null} handData  — { gesture, landmarks, palm_velocity }
+     */
     update(handData) {
-        const lms = handData?.landmarks;
-        if (!lms || lms.length < N_JOINTS) return;
+        if (!handData) return;
 
-        this._gesture = handData.gesture || 'none';
-        const color = COLORS[this._gesture] || COLORS.none;
+        const gesture = handData.gesture || 'none';
+        const lms = handData.landmarks;
 
-        // 1. EMA-smooth & store the 21 world positions
-        for (let i = 0; i < N_JOINTS; i++) {
-            const lm = lms[i];
-            const sx = this._ema[i].x.update(lm.x) * this._scale;
-            const sy = this._ema[i].y.update(lm.y) * -this._scale; // flip Y (image → world)
-            const sz = this._ema[i].z.update(lm.z) * this._scale;
-            this._positions[i].set(sx, sy, sz);
+        // ── Wrist-driven arm sway ─────────────────────────────────────────────
+        if (lms && lms.length > 0) {
+            // MediaPipe wrist: x=[0,1] centre=0.5, y=[0,1] centre=0.5
+            const rawX = (lms[0].x - 0.5) * 2;   // -1..+1, mirrored
+            const rawY = (lms[0].y - 0.5) * -2;  // -1..+1, up = positive
+
+            const swX = this._emaX.update(rawX) * SWAY_X * this._sign;
+            const swY = this._emaY.update(rawY) * SWAY_Y;
+
+            this.root.position.set(
+                this._sign * SHOULDER_OFFSET.x + swX,
+                SHOULDER_OFFSET.y + swY,
+                SHOULDER_OFFSET.z,
+            );
         }
 
-        // 2. Update joint InstancedMesh
-        this._joints.material.color.copy(color);
-        for (let i = 0; i < N_JOINTS; i++) {
-            this._dummy.position.copy(this._positions[i]);
-            this._dummy.updateMatrix();
-            this._joints.setMatrixAt(i, this._dummy.matrix);
+        // ── Finger curl animation ─────────────────────────────────────────────
+        if (gesture !== this._curGesture) {
+            this._curGesture = gesture;
         }
-        this._joints.instanceMatrix.needsUpdate = true;
+        const targetCurls = CURL[gesture] || CURL.none;
 
-        // 3. Update bone positions in-place
-        for (let b = 0; b < N_BONES; b++) {
-            const [a, c] = CONNECTIONS[b];
-            const pa = this._positions[a], pb = this._positions[c];
-            const off = b * 6;
-            this._bonePos[off] = pa.x; this._bonePos[off + 1] = pa.y; this._bonePos[off + 2] = pa.z;
-            this._bonePos[off + 3] = pb.x; this._bonePos[off + 4] = pb.y; this._bonePos[off + 5] = pb.z;
+        for (let f = 0; f < 4; f++) {
+            for (let s = 0; s < 3; s++) {
+                const pivot = this._fingers[f][s];
+                // Lerp toward target curl angle (smooth animation)
+                pivot.rotation.x += (targetCurls[s] - pivot.rotation.x) * 0.2;
+            }
         }
-        this._bones.geometry.getAttribute('position').needsUpdate = true;
+    }
 
-        // 4. Move grab sphere to wrist/palm centre (landmark 0)
-        this.grabSphere.position.copy(this._positions[0]);
+    /**
+     * Get the world-space position of the grab point (palm tip).
+     * Used by HandPhysics.
+     */
+    getGrabWorldPos(out = new THREE.Vector3()) {
+        this.grabPoint.getWorldPosition(out);
+        return out;
     }
 
     setVisible(v) {
-        this._joints.visible = v;
-        this._bones.visible = v;
-        // grabSphere intentionally always invisible to renderer
+        this.root.visible = v;
         this._visible = v;
     }
 
-    resetEMA() { this._ema.forEach(f => { f.x.reset(); f.y.reset(); f.z.reset(); }); }
+    resetEMA() {
+        this._emaX.reset();
+        this._emaY.reset();
+    }
 
     dispose() {
-        [this._joints, this._bones, this.grabSphere].forEach(obj => {
-            this._scene.remove(obj);
-            obj.geometry?.dispose();
-            obj.material?.dispose();
+        this._mecha.remove(this.root);
+        this.root.traverse(obj => {
+            if (obj.geometry) obj.geometry.dispose();
+            if (obj.material) obj.material.dispose();
         });
     }
 }

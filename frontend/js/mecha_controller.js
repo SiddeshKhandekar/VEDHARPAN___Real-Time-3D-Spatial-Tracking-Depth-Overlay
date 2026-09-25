@@ -46,8 +46,9 @@ export class MechaController {
         this.shootCooldown = 200; // ms
 
         // Per-mode ammo pool and cooldown (rounds / cooldownMs)
-        const MAX = { 1: 15, 2: 200, 3: 10, 4: 2 };
-        const CD = { 1: 120000, 2: 40000, 3: 60000, 4: 180000 };
+        const MAX = { 1: 15, 2: 200, 3: 10, 4: 999 };
+        const CD = { 1: 120000, 2: 40000, 3: 60000, 4: 0 }; // Mode 4: no cooldown (physical hands)
+
         this.ammo = {};
         [1, 2, 3, 4].forEach(m => {
             this.ammo[m] = { rounds: MAX[m], max: MAX[m], cooldownMs: CD[m], reloadEnd: 0, isReloading: false };
