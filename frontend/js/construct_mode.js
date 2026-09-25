@@ -53,15 +53,13 @@ export class ConstructMode {
             return;
         }
         this._active = true;
+        console.log('[ConstructMode] activated — creating hand rigs');
 
-        // Create rigs anchored to mechaWrapper
+        // Create rigs anchored to mechaWrapper (always visible once created)
         this._leftRig = new HandRig(this._scene, this._mecha, 'left');
         this._rightRig = new HandRig(this._scene, this._mecha, 'right');
 
-        this._leftRig.setVisible(true);
-        this._rightRig.setVisible(true);
-
-        // Create physics layer, attach rigs so it can read grab-point positions
+        // Create physics layer
         this._physics = new HandPhysics(this._world, this._bodies, this._camera);
         this._physics.attachRigs(this._leftRig, this._rightRig);
 
@@ -93,11 +91,12 @@ export class ConstructMode {
         if (!this._active) return;
         const hands = frame?.hands ?? [];
 
-        // Split by handedness
+        // Split by handedness — backend sends 'Left'/'Right' (capitalised)
         let leftData = null, rightData = null;
         for (const h of hands) {
-            if (h.handedness === 'Left') leftData = h;
-            else rightData = h;
+            const hdn = (h.handedness || '').toLowerCase();
+            if (hdn === 'left') leftData = h;
+            else if (hdn === 'right') rightData = h;
         }
 
         this._leftRig?.update(leftData);
