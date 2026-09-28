@@ -213,6 +213,43 @@ class VectorEMAFilter:
         self._z_filter.reset()
 
 
+class LandmarkEMABank:
+    """Per-landmark EMA for all 21 hand landmarks (x, y, z axes independently).
+
+    Provides 63 independent EMA filters (21 landmarks × 3 axes) so that every
+    coordinate of every landmark is individually smoothed each frame.
+    When a hand goes out of frame, call reset() to flush all filter states.
+
+    Args:
+        alpha: Smoothing coefficient (0,1]. Lower = smoother, higher = faster.
+               A value of 0.25 is a good balance for 30fps webcam input.
+        n:     Number of landmarks (21 for MediaPipe hand).
+    """
+
+    def __init__(self, alpha: float = 0.25, n: int = 21) -> None:
+        self._filters = [
+            [ExponentialMovingAverage(alpha) for _ in range(3)]   # x, y, z
+            for _ in range(n)
+        ]
+
+    def update(self, landmarks: List[Dict[str, float]]) -> List[Dict[str, float]]:
+        """Apply per-axis EMA to every landmark and return smoothed list."""
+        smoothed = []
+        for i, lm in enumerate(landmarks):
+            smoothed.append({
+                "x": round(self._filters[i][0].update(lm["x"]), 5),
+                "y": round(self._filters[i][1].update(lm["y"]), 5),
+                "z": round(self._filters[i][2].update(lm["z"]), 5),
+            })
+        return smoothed
+
+    def reset(self) -> None:
+        """Flush all filter states when the hand leaves the frame."""
+        for lm_filters in self._filters:
+            for f in lm_filters:
+                f.reset()
+
+
 # ---------------------------------------------------------------------------
 # Coordinate utilities
 # ---------------------------------------------------------------------------
@@ -365,6 +402,11 @@ class VisionPipeline:
         self._hand_emas = [
             VectorEMAFilter(alpha=EMA_ALPHA_HAND),
             VectorEMAFilter(alpha=EMA_ALPHA_HAND)
+        ]
+        # Per-landmark EMA banks: 21 landmarks × 3 axes each, one bank per hand slot.
+        self._landmark_ema_banks: List[LandmarkEMABank] = [
+            LandmarkEMABank(alpha=0.25),
+            LandmarkEMABank(alpha=0.25),
         ]
 
         # MediaPipe solution handles (initialised inside the worker thread
@@ -613,18 +655,20 @@ class VisionPipeline:
             smooth_hands = []
             for i, (raw_hand_center, raw_landmarks, gesture, handedness, palm_velocity) in enumerate(extracted_hands):
                 if i < len(self._hand_emas):
-                    smooth_center = self._hand_emas[i].update(raw_hand_center)
+                    smooth_center     = self._hand_emas[i].update(raw_hand_center)
+                    smooth_landmarks  = self._landmark_ema_banks[i].update(raw_landmarks)
                     smooth_hands.append({
-                        "center":       smooth_center,
-                        "landmarks":    raw_landmarks,
-                        "gesture":      gesture,
-                        "handedness":   handedness,
+                        "center":        smooth_center,
+                        "landmarks":     smooth_landmarks,   # EMA-smoothed, not raw
+                        "gesture":       gesture,
+                        "handedness":    handedness,
                         "palm_velocity": palm_velocity,
                     })
             
-            # Reset unused EMAs
+            # Reset unused EMAs and landmark banks
             for i in range(len(extracted_hands), len(self._hand_emas)):
                 self._hand_emas[i].reset()
+                self._landmark_ema_banks[i].reset()
 
             # --- Update backend fist-hold debounce timer for debug bar ---
             any_fist = any(
