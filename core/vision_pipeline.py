@@ -706,19 +706,24 @@ class VisionPipeline:
 
                     pts = [lm_px(lm) for lm in raw_lm_list]
 
-                    # Draw skeleton connections
+                    # Draw skeleton connections (thicker lines for visibility)
                     for (a, b) in _HAND_CONNECTIONS:
-                        cv2.line(debug_img, pts[a], pts[b], (0, 200, 200), 1)
+                        cv2.line(debug_img, pts[a], pts[b], (0, 220, 220), 2)
 
-                    # Draw all 21 joint dots
+                    # Draw all 21 joint dots (larger radius)
                     for pt in pts:
-                        cv2.circle(debug_img, pt, 3, (0, 255, 100), -1)
+                        cv2.circle(debug_img, pt, 5, (0, 255, 100), -1)
 
-                    # Highlight index fingertip (landmark 8) in bold red
+                    # Highlight all 5 fingertips (4=thumb, 8=index, 12=middle, 16=ring, 20=pinky)
+                    for tip_idx in (4, 8, 12, 16, 20):
+                        cx, cy = pts[tip_idx]
+                        cv2.circle(debug_img, (cx, cy), 8, (0, 80, 255), -1)
+                        cv2.circle(debug_img, (cx, cy), 9, (0, 220, 255), 1)  # outer ring
+
+                    # Index fingertip label
                     ix, iy = pts[8]
-                    cv2.circle(debug_img, (ix, iy), 7, (0, 0, 255), -1)
-                    cv2.putText(debug_img, "INDEX", (ix + 6, iy - 6),
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.38, (0, 80, 255), 1)
+                    cv2.putText(debug_img, "IDX", (ix + 6, iy - 6),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.35, (0, 80, 255), 1)
 
                     # Gesture label + handedness above wrist
                     wx, wy = pts[0]
