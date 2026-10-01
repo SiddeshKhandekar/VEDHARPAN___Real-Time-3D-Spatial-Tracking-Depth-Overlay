@@ -8,6 +8,7 @@ import { VisualEffects } from './effects.js';
 import { MechaController } from './mecha_controller.js';
 import { SettingsManager, ACTIONS } from './settings.js';
 import { ConstructMode } from './construct_mode.js';
+import { LegacyConstructMode } from './legacy_construct_mode.js';
 
 /**
  * VEDHARPAN Phase 2: Three.js Viewport & Shadow Physics Engine
@@ -46,7 +47,8 @@ class DioramaScene {
         this.camera = null;
         this.renderer = null;
         this.dirLight = null;
-        this.constructMode = null; // Mode 4 Construct system
+        this.constructMode = null;        // Mode 5: Physical Hands
+        this.legacyConstructMode = null;  // Mode 4: Draw & Launch
 
         // Assets
         this.roomModel = null;
@@ -365,12 +367,12 @@ class DioramaScene {
         });
 
         // ── Fire Mode Label ────────────────────────────────────────
-        const fireModeNames = { 1: 'PLASMA', 2: 'RAPID', 3: 'MISSILE', 4: 'GRENADE' };
-        const fireModeColors = { 1: '#9933ff', 2: '#ff8800', 3: '#ff5500', 4: '#ff0000' };
+        const fireModeNames = { 1: 'PLASMA', 2: 'RAPID', 3: 'MISSILE', 4: 'DRAW & LAUNCH', 5: 'PHYS HANDS' };
+        const fireModeColors = { 1: '#9933ff', 2: '#ff8800', 3: '#ff5500', 4: '#00f2fe', 5: '#ff7233' };
 
         // ── Ammo Meters ────────────────────────────────────────────
         const meterEls = {};
-        [1, 2, 3, 4].forEach(m => {
+        [1, 2, 3, 4, 5].forEach(m => {
             const card = document.getElementById(`meter-${m}`);
             if (!card) return;
             meterEls[m] = {
@@ -412,7 +414,7 @@ class DioramaScene {
                 m.card.classList.remove('cooling');
                 m.fill.style.width = `${max > 0 ? (rounds / max) * 100 : 100}%`;
                 // Mode 4 (Physical Hands) — no ammo concept, display infinity symbol
-                m.count.textContent = (mode === 4) ? '∞' : `${rounds}/${max}`;
+                m.count.textContent = (mode === 4 || mode === 5) ? '∞' : `${rounds}/${max}`;
 
             }
         }
@@ -424,7 +426,7 @@ class DioramaScene {
                 el.textContent = fireModeNames[mode] ?? 'PLASMA';
                 el.style.color = fireModeColors[mode] ?? '#9933ff';
             }
-            [1, 2, 3, 4].forEach(m => meterEls[m]?.card.classList.toggle('active', m === mode));
+            [1, 2, 3, 4, 5].forEach(m => meterEls[m]?.card.classList.toggle('active', m === mode));
             const mc = this.mechaController;
             if (mc?.ammo?.[mode]) {
                 const a = mc.ammo[mode];
@@ -433,28 +435,40 @@ class DioramaScene {
                 }));
             }
 
-            // Activate/deactivate ConstructMode on mode 4 toggle
-            if (this.constructMode) {
-                if (mode === 4) {
-                    // Auto-switch to 3rd Person so orbit yaw/pitch drives camera
-                    if (this.cameraMode !== 1 && this.cameraMode !== 3) {
-                        this._preModeCamera = this.cameraMode;
-                        this.cameraMode = 1;  // Third Person orbit
-                        if (this.hudCameraMode) this.hudCameraMode.textContent = this.cameraModeNames[this.cameraMode];
-                    }
-                    this.constructMode.setMechaWrapper(this.mechaWrapper);
-                    this.constructMode.activate();
-                    this.setWebcamActive(true);
-                } else {
-                    // Restore previous camera mode
-                    if (this._preModeCamera !== undefined) {
-                        this.cameraMode = this._preModeCamera;
-                        if (this.hudCameraMode) this.hudCameraMode.textContent = this.cameraModeNames[this.cameraMode];
-                        this._preModeCamera = undefined;
-                    }
-                    this.constructMode.deactivate();
-                    this.setWebcamActive(false);
+            // Activate/deactivate construct modes on mode change
+            // Mode 4 = LegacyConstructMode (Draw & Launch)
+            // Mode 5 = ConstructMode (Physical Hands)
+            if (mode === 4) {
+                // Auto-switch to 3rd Person so orbit yaw/pitch drives camera during AIMING
+                if (this.cameraMode !== 1 && this.cameraMode !== 3) {
+                    this._preModeCamera = this.cameraMode;
+                    this.cameraMode = 1;
+                    if (this.hudCameraMode) this.hudCameraMode.textContent = this.cameraModeNames[this.cameraMode];
                 }
+                this.legacyConstructMode?.activate();
+                this.constructMode?.deactivate();
+                this.setWebcamActive(true);
+            } else if (mode === 5) {
+                // Auto-switch to 3rd Person so orbit yaw/pitch drives camera
+                if (this.cameraMode !== 1 && this.cameraMode !== 3) {
+                    this._preModeCamera = this.cameraMode;
+                    this.cameraMode = 1;
+                    if (this.hudCameraMode) this.hudCameraMode.textContent = this.cameraModeNames[this.cameraMode];
+                }
+                this.constructMode?.setMechaWrapper(this.mechaWrapper);
+                this.constructMode?.activate();
+                this.legacyConstructMode?.deactivate();
+                this.setWebcamActive(true);
+            } else {
+                // Any other mode: deactivate both construct modes
+                if (this._preModeCamera !== undefined) {
+                    this.cameraMode = this._preModeCamera;
+                    if (this.hudCameraMode) this.hudCameraMode.textContent = this.cameraModeNames[this.cameraMode];
+                    this._preModeCamera = undefined;
+                }
+                this.legacyConstructMode?.deactivate();
+                this.constructMode?.deactivate();
+                this.setWebcamActive(false);
             }
         });
 
@@ -773,9 +787,24 @@ class DioramaScene {
      * Initialise the ConstructMode (Mode 4) system.
      */
     initConstructMode() {
-        // Pass the raw CANNON.World, dynamic body pairs, and camera.
-        // mechaWrapper is injected lazily via setMechaWrapper() when Mode 4 first activates
-        // (because mechaWrapper does not exist until the GLTF load completes).
+        // Mode 4 — Legacy Draw & Launch (restored from commit 7191752d)
+        // Uses inputManager to poll mouseState for force-meter charging.
+        this.legacyConstructMode = new LegacyConstructMode(
+            this.scene,
+            this.physicsWorld,
+            this.camera,
+            this.inputManager,
+        );
+        // Bind orbit setters so head-aim can drive the camera during AIMING phase
+        this.legacyConstructMode.bindOrbitSetters(
+            (v) => { this.orbitYaw = v; },
+            (v) => { this.orbitPitch = v; },
+            () => this.orbitYaw,
+            () => this.orbitPitch,
+        );
+
+        // Mode 5 — Current Physical Hands (ConstructMode using HandRig + HandPhysics)
+        // mechaWrapper is injected lazily via setMechaWrapper() when Mode 5 first activates.
         this.constructMode = new ConstructMode(
             this.scene,
             this.physicsWorld.world,
@@ -1534,7 +1563,7 @@ class DioramaScene {
 
             // Sync webcam state with current fire mode over the fresh connection
             if (this.inputManager) {
-                this.setWebcamActive(this.inputManager.fireMode === 4);
+                this.setWebcamActive(this.inputManager.fireMode === 4 || this.inputManager.fireMode === 5);
             }
         };
 
@@ -1551,7 +1580,11 @@ class DioramaScene {
                     this.latestHands = data.hands;
                     this.hudHand.textContent = `${data.hands.length} detected`;
 
-                    // Route new telemetry to ConstructMode (Mode 4)
+                    // Route telemetry to the active construct mode
+                    if (this.legacyConstructMode?.isActive) {
+                        // LegacyConstructMode uses onTelemetry(hands, head) separately
+                        this.legacyConstructMode.onTelemetry(data.hands, data.head ?? null);
+                    }
                     if (this.constructMode?.isActive) {
                         this.constructMode.update({ hands: data.hands, head: data.head });
                     }

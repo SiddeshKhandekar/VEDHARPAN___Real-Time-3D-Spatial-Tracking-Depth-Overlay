@@ -36,7 +36,7 @@ export class InputManager {
         this.aimActive = false;
         this.isShooting = false;
         this.aimTarget = new THREE.Vector3();
-        this.fireMode = 1; // 1=Plasma, 2=Rapid, 3=Missile, 4=Grenade
+        this.fireMode = 1; // 1=Plasma, 2=Rapid, 3=Missile, 4=Draw & Launch, 5=Physical Hands
 
         // Gesture overrides
         this.gestureAimActive = false;
@@ -63,6 +63,7 @@ export class InputManager {
             '2': 'fireMode2',
             '3': 'fireMode3',
             '4': 'fireMode4',
+            '5': 'fireMode5',
             'v': 'toggleCamera',
             'escape': 'openMenu',
         };
@@ -100,7 +101,7 @@ export class InputManager {
         if (action === 'jump') { this.keys[' '] = true; return; }
 
         // ── Fire mode switching ────────────────────────────────
-        const fireModeMap = { fireMode1: 1, fireMode2: 2, fireMode3: 3, fireMode4: 4 };
+        const fireModeMap = { fireMode1: 1, fireMode2: 2, fireMode3: 3, fireMode4: 4, fireMode5: 5 };
         if (fireModeMap[action] !== undefined) {
             this.fireMode = fireModeMap[action];
             window.dispatchEvent(new CustomEvent('fireModeChanged', { detail: this.fireMode }));
@@ -152,7 +153,7 @@ export class InputManager {
         this.domElement.addEventListener('wheel', (e) => {
             if (e.deltaY > 0) {
                 // Scroll Down -> Next mode
-                if (this.fireMode < 4) {
+                if (this.fireMode < 5) {
                     this.fireMode++;
                     window.dispatchEvent(new CustomEvent('fireModeChanged', { detail: this.fireMode }));
                 }

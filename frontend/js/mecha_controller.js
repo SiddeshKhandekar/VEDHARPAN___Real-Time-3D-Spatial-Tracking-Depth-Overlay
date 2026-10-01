@@ -46,11 +46,11 @@ export class MechaController {
         this.shootCooldown = 200; // ms
 
         // Per-mode ammo pool and cooldown (rounds / cooldownMs)
-        const MAX = { 1: 15, 2: 200, 3: 10, 4: 999 };
-        const CD = { 1: 120000, 2: 40000, 3: 60000, 4: 0 }; // Mode 4: no cooldown (physical hands)
+        const MAX = { 1: 15, 2: 200, 3: 10, 4: 999, 5: 999 };
+        const CD = { 1: 120000, 2: 40000, 3: 60000, 4: 0, 5: 0 }; // Modes 4&5: no cooldown (vision modes)
 
         this.ammo = {};
-        [1, 2, 3, 4].forEach(m => {
+        [1, 2, 3, 4, 5].forEach(m => {
             this.ammo[m] = { rounds: MAX[m], max: MAX[m], cooldownMs: CD[m], reloadEnd: 0, isReloading: false };
         });
 
@@ -350,7 +350,7 @@ export class MechaController {
 
         // Tick cooldowns — restore ammo when timer expires
         const now = performance.now();
-        [1, 2, 3, 4].forEach(m => {
+        [1, 2, 3, 4, 5].forEach(m => {
             const a = this.ammo[m];
             if (a.isReloading && now >= a.reloadEnd) {
                 a.isReloading = false;
@@ -937,9 +937,9 @@ export class MechaController {
                 }
             }, 200);
 
-        } else if (fireMode === 4) {
-            // Mode 4: Construct (Physical Hands) — no projectile, no ammo consumed.
-            // Grab/throw is driven by hand gesture + webcam, not mouse click.
+        } else if (fireMode === 4 || fireMode === 5) {
+            // Mode 4: Draw & Launch — no projectile; driven by LegacyConstructMode via telemetry.
+            // Mode 5: Physical Hands — no projectile; driven by ConstructMode via telemetry.
             // Refund the ammo so the bar stays full (decorative ∞ mode).
             a.rounds++;
             a.isReloading = false;
