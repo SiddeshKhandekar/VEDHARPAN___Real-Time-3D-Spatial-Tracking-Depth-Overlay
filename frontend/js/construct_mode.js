@@ -28,7 +28,8 @@ const MAX_POINTS = 150;       // Max stroke points per session
 const MIN_STROKE_DIST = 0.05;      // Min world-space distance between points (anti-aliasing)
 const FIST_HOLD_MS = 400;       // ms left-fist must be held to trigger extrusion
 const COOLDOWN_MS = 30_000;    // 30 seconds cooldown
-const LIFETIME_MS = 300_000;   // Spawned object lives 5 min
+const LIFETIME_MS = 120_000;   // Spawned object lives 2 min
+const STALE_WARN_MS = 20_000;   // Last 20 s — object pulses orange to warn of despawn
 const DESPAWN_ALT = -300;      // Auto-despawn if below this Y
 
 // Force meter / launch speed
@@ -454,15 +455,21 @@ export class ConstructMode {
 
         body.position.copy(mesh.position);
         body.quaternion.copy(mesh.quaternion);
-        body.linearDamping = 0.1;
-        body.angularDamping = 0.4;
+        // Higher damping so the object quickly settles to rest on surfaces
+        body.linearDamping = 0.55;
+        body.angularDamping = 0.70;
+        // Enable sleep — cannon-es will freeze the body once velocity is negligible,
+        // preventing micro-jitter after landing and saving CPU.
+        body.allowSleep = true;
+        body.sleepSpeedLimit = 0.4;   // m/s — threshold to enter sleep
+        body.sleepTimeLimit = 0.8;   // s  — how long below threshold before sleeping
         body.collisionFilterGroup = 2;
         body.collisionFilterMask = 1;
         body.type = CANNON.Body.KINEMATIC;  // stays frozen until fired
         body.velocity.set(0, 0, 0);
         this.physicsWorld.world.addBody(body);
 
-        this._constructObjects.push({ mesh, body, fired: false, timeout: null });
+        this._constructObjects.push({ mesh, body, fired: false, timeout: null, firedAt: null });
 
         // Clear the drawn stroke
         this._clearStrokeLine();
@@ -486,8 +493,10 @@ export class ConstructMode {
 
         obj.body.type = CANNON.Body.DYNAMIC;
         obj.body.updateMassProperties();
+        obj.body.wakeUp();
         obj.body.velocity.set(dir.x * speed, dir.y * speed, dir.z * speed);
         obj.fired = true;
+        obj.firedAt = performance.now();
         obj.timeout = setTimeout(() => this._despawnObject(obj), LIFETIME_MS);
 
         this.state = STATES.FIRED;
@@ -540,16 +549,53 @@ export class ConstructMode {
     // ─── Lifetime & Despawn ───────────────────────────────────────────────────
 
     _tickObjectLifetime() {
-        for (const obj of this._constructObjects) {
-            if (obj.fired) {
-                obj.mesh.position.copy(obj.body.position);
-                obj.mesh.quaternion.copy(obj.body.quaternion);
-                if (obj.body.type === CANNON.Body.KINEMATIC) {
-                    obj.body.type = CANNON.Body.DYNAMIC;
-                    obj.body.updateMassProperties();
-                }
-                if (obj.body.position.y < DESPAWN_ALT) {
-                    this._despawnObject(obj);
+        const now = performance.now();
+        for (let i = this._constructObjects.length - 1; i >= 0; i--) {
+            const obj = this._constructObjects[i];
+            if (!obj.fired) continue;
+
+            // Sync THREE mesh to physics body
+            obj.mesh.position.copy(obj.body.position);
+            obj.mesh.quaternion.copy(obj.body.quaternion);
+
+            // Safety: ensure body is DYNAMIC once fired
+            if (obj.body.type === CANNON.Body.KINEMATIC) {
+                obj.body.type = CANNON.Body.DYNAMIC;
+                obj.body.updateMassProperties();
+                obj.body.wakeUp();
+            }
+
+            // Despawn if fallen below the world floor
+            if (obj.body.position.y < DESPAWN_ALT) {
+                this._despawnObject(obj);
+                continue;
+            }
+
+            // ── Stale visual warning (last STALE_WARN_MS ms) ───────────────────
+            if (obj.firedAt !== null) {
+                const remaining = LIFETIME_MS - (now - obj.firedAt);
+                if (remaining < STALE_WARN_MS) {
+                    // t goes 1 → 0 as the object approaches despawn
+                    const t = Math.max(0, remaining / STALE_WARN_MS);
+                    // Pulse frequency increases as it gets staler
+                    const pulse = (Math.sin(now * 0.004 * (1 + (1 - t) * 4)) + 1) / 2;
+                    const mat = obj.mesh.material;
+                    // Opacity: fades from healthy 0.55 down to 0.15 with a pulse
+                    mat.opacity = 0.15 + t * 0.40 + pulse * 0.15 * (1 - t);
+                    // Emissive shifts from cyan to orange-red
+                    mat.emissive.setRGB(
+                        0.0 + (1 - t) * 0.9 + pulse * 0.3 * (1 - t),  // red rises
+                        0.2 * t + (1 - t) * 0.25,                       // green drops
+                        0.2 * t                                          // blue drops
+                    );
+                    mat.emissiveIntensity = 0.4 + (1 - t) * 2.0;
+                    mat.needsUpdate = false;  // geometry unchanged; no full recompile
+                } else {
+                    // Healthy — restore default appearance
+                    const mat = obj.mesh.material;
+                    mat.opacity = 0.55;
+                    mat.emissive.setHex(0x003344);
+                    mat.emissiveIntensity = 0.4;
                 }
             }
         }
@@ -557,6 +603,10 @@ export class ConstructMode {
 
     _despawnObject(obj) {
         clearTimeout(obj.timeout);
+        // Restore material opacity before removal (avoids THREE.js warnings)
+        if (obj.mesh.material) {
+            obj.mesh.material.opacity = 0;
+        }
         this.scene.remove(obj.mesh);
         if (obj.body.world) this.physicsWorld.world.removeBody(obj.body);
         const idx = this._constructObjects.indexOf(obj);
