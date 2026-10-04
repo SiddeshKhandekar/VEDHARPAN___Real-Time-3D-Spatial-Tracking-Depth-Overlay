@@ -649,7 +649,7 @@ class DioramaScene {
         const sm = this.settingsManager;
         const groups = {
             'kb-movement-rows': ['moveForward', 'moveBackward', 'moveLeft', 'moveRight', 'jump'],
-            'kb-combat-rows': ['fireMode1', 'fireMode2', 'fireMode3', 'fireMode4', 'toggleShield', 'holdShield'],
+            'kb-combat-rows': ['fireMode1', 'fireMode2', 'fireMode3', 'fireMode4', 'fireMode5', 'toggleShield', 'holdShield'],
             'kb-system-rows': ['toggleCamera', 'togglePhysicsCloak', 'respawn', 'openMenu'],
             'kb-freeRoam-rows': ['frForward', 'frBackward', 'frLeft', 'frRight', 'frRotLeft', 'frRotRight', 'frUp', 'frDown', 'frFlight', 'frRecenter'],
             'kb-flight-rows': ['toggleFlight', 'flightUp', 'flightDown', 'flightTurnLeft', 'flightTurnRight', 'flightBoost'],
@@ -2142,7 +2142,9 @@ class DioramaScene {
         // Reset the flight camera intercept flag at the start of the next structural evaluation frame
         this._flightYawThisFrame = false;
 
-        // 2. Update ConstructMode (Mode 4 hand-drawing system)
+        // 2. Update vision-based construct modes per-frame
+        // (LegacyConstructMode handles object tracking, force-meter, aiming; ConstructMode handles HandRig physics)
+        if (this.legacyConstructMode) this.legacyConstructMode.update(dt);
         if (this.constructMode) this.constructMode.update(dt);
 
         // 3. Update Physics and Logic (Always loops, even under menu)
@@ -2174,8 +2176,6 @@ class DioramaScene {
         }
         if (this.effects) this.effects.update(dt);
 
-        // Construct Mode (Mode 4) per-frame tick
-        if (this.constructMode) this.constructMode.update(dt);
 
         // 4. Render main loop frame
         if (this.activeAsteroidOrbit) {

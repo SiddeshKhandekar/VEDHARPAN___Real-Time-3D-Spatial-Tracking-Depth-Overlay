@@ -23,7 +23,8 @@ export const ACTIONS = {
     fireMode1: { label: 'Fire Mode: Plasma', group: 'combat', defaultKey: '1' },
     fireMode2: { label: 'Fire Mode: Rapid', group: 'combat', defaultKey: '2' },
     fireMode3: { label: 'Fire Mode: Missile', group: 'combat', defaultKey: '3' },
-    fireMode4: { label: 'Fire Mode: Grenade', group: 'combat', defaultKey: '4' },
+    fireMode4: { label: 'Fire Mode: Draw & Launch', group: 'combat', defaultKey: '4' },
+    fireMode5: { label: 'Fire Mode: Physical Hands', group: 'combat', defaultKey: '5' },
     toggleShield: { label: 'Toggle Shield', group: 'combat', defaultKey: 'q', displayDefault: 'Q' },
     holdShield: { label: 'Hold Shield (Interrupt)', group: 'combat', defaultKey: 'e', displayDefault: 'E' },
 

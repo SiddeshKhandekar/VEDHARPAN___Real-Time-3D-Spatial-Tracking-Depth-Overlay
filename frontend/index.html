@@ -72,6 +72,51 @@
         <div class="game-hud-item">&#x1F3C6; <span id="score">0</span></div>
     </div>
 
+    <!-- Mode 4: Draw & Launch HUD Elements -->
+    <!-- Stroke point budget counter (bottom-left) -->
+    <div id="construct-points" class="hidden"
+        style="position:fixed;bottom:24px;left:24px;font-family:'Orbitron',monospace;color:#00f2fe;font-size:0.9rem;font-weight:bold;text-shadow:0 0 8px #00f2fe;pointer-events:none;z-index:9000;letter-spacing:2px;background:rgba(0,0,0,0.55);padding:6px 14px;border-radius:6px;border:1px solid rgba(0,242,254,0.35);">
+        POINTS: 100/100</div>
+
+    <!-- Force meter (charge-hold-release fire indicator, right edge) -->
+    <div id="force-meter-wrap" class="hidden" style="
+        position:fixed;
+        right:28px;
+        bottom:80px;
+        width:18px;
+        height:160px;
+        background:rgba(0,0,0,0.55);
+        border:1px solid rgba(0,242,254,0.4);
+        border-radius:9px;
+        overflow:hidden;
+        display:flex;
+        flex-direction:column-reverse;
+        align-items:center;
+        pointer-events:none;
+        z-index:9001;
+    ">
+        <div id="force-meter-fill" style="
+            width:100%;
+            height:0%;
+            background:#00f2fe;
+            border-radius:9px;
+            transition:height 0.04s linear;
+            box-shadow:0 0 8px rgba(0,242,254,0.8);
+        "></div>
+    </div>
+    <div id="force-meter-label" class="hidden" style="
+        position:fixed;
+        right:20px;
+        bottom:52px;
+        font-family:'Orbitron',monospace;
+        font-size:0.6rem;
+        color:#00f2fe;
+        letter-spacing:2px;
+        pointer-events:none;
+        z-index:9001;
+        text-shadow:0 0 6px #00f2fe;
+    ">FORCE</div>
+
     <!-- Hand Gesture Status Strip (Mode 4 only) -->
     <div id="hand-gesture-hud" class="hidden" style="
         position:fixed;
@@ -312,7 +357,8 @@
                         <tr>
                             <td class="col-action">Cycle Fire Mode</td>
                             <td><span class="key-badge">Scroll Wheel</span></td>
-                            <td class="mouse-note">Cycles Plasma &#x2192; Rapid &#x2192; Missile &#x2192; Construct
+                            <td class="mouse-note">Cycles Plasma &#x2192; Rapid &#x2192; Missile &#x2192; Draw &amp;
+                                Launch &#x2192; Phys Hands
                             </td>
                         </tr>
                         <tr>
@@ -442,7 +488,13 @@
             </div>
         </div>
         <div class="ammo-meter" id="meter-4" data-mode="4">
-            <span class="meter-label">CONSTRUCT <span class="meter-count">2/2</span></span>
+            <span class="meter-label">DRAW-LAUNCH <span class="meter-count">∞</span></span>
+            <div class="meter-track">
+                <div class="meter-fill" style="width:100%"></div>
+            </div>
+        </div>
+        <div class="ammo-meter" id="meter-5" data-mode="5">
+            <span class="meter-label">PHYS HANDS <span class="meter-count">∞</span></span>
             <div class="meter-track">
                 <div class="meter-fill" style="width:100%"></div>
             </div>
