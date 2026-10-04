@@ -27,7 +27,7 @@ const STATES = Object.freeze({
 const MAX_POINTS = 150;       // Max stroke points per session
 const MIN_STROKE_DIST = 0.05;      // Min world-space distance between points (anti-aliasing)
 const FIST_HOLD_MS = 400;       // ms left-fist must be held to trigger extrusion
-const COOLDOWN_MS = 300_000;   // 5 minutes cooldown
+const COOLDOWN_MS = 30_000;    // 30 seconds cooldown
 const LIFETIME_MS = 300_000;   // Spawned object lives 5 min
 const DESPAWN_ALT = -300;      // Auto-despawn if below this Y
 
@@ -128,9 +128,13 @@ export class ConstructMode {
 
         // Cooldown
         this._cooldownEnd = 0;
+        this._cooldownRAF = null;
 
         // Gesture tracking
         this._prevLeftGesture = 'none';
+
+        // Cooldown timer HUD span (inline in #construct-points)
+        this._timerSpan = document.getElementById('construct-cooldown-timer');
 
         this._initStrokeLine();
         console.log('[ConstructMode] Initialised');
@@ -156,6 +160,7 @@ export class ConstructMode {
         this._clearStrokeLine();
         this._hideForceMeter();
         this.state = STATES.IDLE;
+        this._stopCooldownTimer();
         this._hideHUD();
         console.log('[ConstructMode] Deactivated');
     }
@@ -303,12 +308,20 @@ export class ConstructMode {
             }
             const held = performance.now() - this._fistStart;
 
-            if (held >= FIST_HOLD_MS && this.state === STATES.DRAWING) {
+            // Allow extrusion from DRAWING state, OR from IDLE if the user already
+            // drew ≥3 points and lifted their right finger before making a fist.
+            const canExtrude = this.state === STATES.DRAWING ||
+                (this.state === STATES.IDLE && this._strokePoints.length >= 3);
+
+            if (held >= FIST_HOLD_MS && canExtrude) {
                 if (this._strokePoints.length >= 3) {
                     this._convertStrokeTo3D();  // transitions to OBJECT_READY → AIMING
                 } else {
-                    console.warn('[ConstructMode] Fist locked but stroke too short (< 3 points) — keep drawing');
+                    console.warn('[ConstructMode] Fist locked but stroke too short (< 3 points) — keep drawing first');
                 }
+            } else if (held >= FIST_HOLD_MS && this._strokePoints.length === 0) {
+                // Fist held but no points drawn at all — inform user
+                console.debug('[ConstructMode] Fist held — no stroke points yet; point your right index finger to draw first.');
             }
         } else {
             // Reset fist timer whenever gesture is NOT fist
@@ -556,8 +569,25 @@ export class ConstructMode {
         this.state = STATES.COOLDOWN;
         this._cooldownEnd = performance.now() + COOLDOWN_MS;
         this._updateHUD();
-        console.log('[ConstructMode] Cooldown — 5 minutes');
+        console.log('[ConstructMode] Cooldown — 30 seconds');
         setTimeout(() => this._resetCycle(), COOLDOWN_MS);
+
+        // Launch a RAF-based timer that ticks the inline countdown span
+        this._stopCooldownTimer();
+        const tick = () => {
+            if (this.state !== STATES.COOLDOWN) { this._stopCooldownTimer(); return; }
+            const remaining = Math.max(0, Math.ceil((this._cooldownEnd - performance.now()) / 1000));
+            if (this._timerSpan) {
+                this._timerSpan.textContent = `  ⏱ ${remaining}s`;
+                this._timerSpan.style.display = 'inline';
+            }
+            if (remaining > 0) {
+                this._cooldownRAF = requestAnimationFrame(tick);
+            } else {
+                this._stopCooldownTimer();
+            }
+        };
+        this._cooldownRAF = requestAnimationFrame(tick);
     }
 
     _resetCycle() {
@@ -567,8 +597,21 @@ export class ConstructMode {
         this._fistStart = null;
         this._constructObjects = [];
         this._clearStrokeLine();
+        this._stopCooldownTimer();
         this._updateHUD();
         console.log('[ConstructMode] Ready — cooldown over');
+    }
+
+    /** Cancel the RAF-based cooldown countdown and hide the timer span. */
+    _stopCooldownTimer() {
+        if (this._cooldownRAF !== null) {
+            cancelAnimationFrame(this._cooldownRAF);
+            this._cooldownRAF = null;
+        }
+        if (this._timerSpan) {
+            this._timerSpan.style.display = 'none';
+            this._timerSpan.textContent = '';
+        }
     }
 
     // ─── Stroke Line Renderer ─────────────────────────────────────────────────
@@ -637,16 +680,20 @@ export class ConstructMode {
         if (!this._hudPoints) return;
         const labels = {
             [STATES.IDLE]: '✋ IDLE — Point right index to draw',
-            [STATES.DRAWING]: '✏️ DRAWING — Hold left fist 0.4s to extrude',
+            [STATES.DRAWING]: '✏️ DRAWING — Hold left fist 0.4s to commit (any ≥3 pts)',
             [STATES.OBJECT_READY]: '🟦 EXTRUDING...',
             [STATES.AIMING]: '🎯 AIMING — Hold LMB to charge, release to fire',
             [STATES.FIRED]: '🚀 FIRED',
-            [STATES.COOLDOWN]: '⏳ COOLDOWN — 5 min recharge',
+            [STATES.COOLDOWN]: '⏳ COOLDOWN — 30s recharge',
         };
         const label = labels[this.state] || this.state;
+        // Re-inject innerHTML but preserve the timer span if it exists inside the div
         this._hudPoints.innerHTML =
             `<span style="font-size:0.75rem;opacity:0.75">${label}</span>` +
-            `<br>POINTS: ${this.pointsRemaining}/${MAX_POINTS}`;
+            `<br>POINTS: ${this.pointsRemaining}/${MAX_POINTS}` +
+            `<span id="construct-cooldown-timer" style="display:none;margin-left:8px;color:#ffb300;"></span>`;
+        // Re-grab the timer span reference since innerHTML was replaced
+        this._timerSpan = document.getElementById('construct-cooldown-timer');
         this._hudPoints.classList.remove('hidden');
     }
 

@@ -2139,9 +2139,6 @@ class DioramaScene {
         }
         if (this.effects) this.effects.update(dt);
 
-        // Construct Mode (Mode 4) per-frame tick
-        if (this.constructMode) this.constructMode.update(dt);
-
         // 4. Render main loop frame
         if (this.activeAsteroidOrbit) {
             // Sweeps massive horizontal orbit

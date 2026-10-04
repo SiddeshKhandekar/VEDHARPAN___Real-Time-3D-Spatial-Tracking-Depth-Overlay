@@ -445,6 +445,28 @@
                 box-shadow: 0 0 2px #00f2fe;
             }
         }
+
+        @keyframes timer-blink {
+
+            0%,
+            100% {
+                opacity: 1;
+            }
+
+            50% {
+                opacity: 0.45;
+            }
+        }
+
+        #construct-cooldown-timer {
+            font-family: 'Orbitron', monospace;
+            font-size: 0.82rem;
+            font-weight: bold;
+            color: #ffb300;
+            text-shadow: 0 0 6px #ffb300;
+            letter-spacing: 1px;
+            animation: timer-blink 1s ease-in-out infinite;
+        }
     </style>
 
     <!-- Ammo Meters Panel (bottom-right) -->
