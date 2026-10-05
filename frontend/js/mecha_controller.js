@@ -20,9 +20,9 @@ export class MechaController {
         });
 
         // Add physics body to world
-        // Mecha is Group 4, only collides with Environment (Group 1)
+        // Mecha is Group 4, collides with Environment (1) and Construct objects (2)
         this.body.collisionFilterGroup = 4;
-        this.body.collisionFilterMask = 1;
+        this.body.collisionFilterMask = 1 | 2;
         this.physicsWorld.world.addBody(this.body);
         this.body.smoothSync = true; // Enable lerp-based mesh sync to eliminate flight jitter
         this.physicsWorld.dynamicBodies.push({ mesh: this.mesh, body: this.body });

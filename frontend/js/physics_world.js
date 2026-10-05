@@ -10,11 +10,29 @@ export class PhysicsWorld {
 
         // Physics materials
         this.defaultMaterial = new CANNON.Material('default');
+        this.mechaMaterial = new CANNON.Material('mecha');
+        this.constructMaterial = new CANNON.Material('construct');
+
         const defaultContactMaterial = new CANNON.ContactMaterial(this.defaultMaterial, this.defaultMaterial, {
             friction: 0.3,
             restitution: 0.2
         });
         this.world.addContactMaterial(defaultContactMaterial);
+
+        // Mecha stands on construct objects: grippy but near-zero bounce
+        const mechaConstructContact = new CANNON.ContactMaterial(this.mechaMaterial, this.constructMaterial, {
+            friction: 0.6,
+            restitution: 0.05
+        });
+        this.world.addContactMaterial(mechaConstructContact);
+
+        // Also pair construct with the default environment material so objects
+        // settle on floors/buildings correctly
+        const constructDefaultContact = new CANNON.ContactMaterial(this.constructMaterial, this.defaultMaterial, {
+            friction: 0.5,
+            restitution: 0.1
+        });
+        this.world.addContactMaterial(constructDefaultContact);
 
         // Keep track of all bodies paired with meshes
         this.dynamicBodies = [];
@@ -130,6 +148,7 @@ export class PhysicsWorld {
         // Linear damping prevents endless sliding
         body.linearDamping = 0.3;
         body.angularDamping = 0.3;
+        body.material = this.mechaMaterial;
 
 
 
@@ -180,5 +199,14 @@ export class PhysicsWorld {
                 pair.mesh.quaternion.copy(pair.body.quaternion);
             }
         }
+    }
+
+    /**
+     * Returns the CANNON.Material used for construct objects.
+     * ConstructMode assigns this to each spawned body so the mecha-construct
+     * ContactMaterial applies correctly.
+     */
+    getConstructMaterial() {
+        return this.constructMaterial;
     }
 }

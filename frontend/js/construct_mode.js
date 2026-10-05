@@ -463,8 +463,11 @@ export class ConstructMode {
         body.allowSleep = true;
         body.sleepSpeedLimit = 0.4;   // m/s — threshold to enter sleep
         body.sleepTimeLimit = 0.8;   // s  — how long below threshold before sleeping
+        // Assign construct physics material for mecha↔construct ContactMaterial
+        body.material = this.physicsWorld.getConstructMaterial();
+        // Group 2 — visible to environment (1) AND mecha (4)
         body.collisionFilterGroup = 2;
-        body.collisionFilterMask = 1;
+        body.collisionFilterMask = 1 | 4;
         body.type = CANNON.Body.KINEMATIC;  // stays frozen until fired
         body.velocity.set(0, 0, 0);
         this.physicsWorld.world.addBody(body);
