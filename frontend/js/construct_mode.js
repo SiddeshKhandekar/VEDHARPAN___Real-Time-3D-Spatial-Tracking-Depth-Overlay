@@ -455,14 +455,11 @@ export class ConstructMode {
 
         body.position.copy(mesh.position);
         body.quaternion.copy(mesh.quaternion);
-        // Higher damping so the object quickly settles to rest on surfaces
-        body.linearDamping = 0.55;
-        body.angularDamping = 0.70;
-        // Enable sleep — cannon-es will freeze the body once velocity is negligible,
-        // preventing micro-jitter after landing and saving CPU.
-        body.allowSleep = true;
-        body.sleepSpeedLimit = 0.4;   // m/s — threshold to enter sleep
-        body.sleepTimeLimit = 0.8;   // s  — how long below threshold before sleeping
+        // High damping keeps the object from sliding endlessly after landing.
+        // Do NOT enable allowSleep — sleeping bodies are skipped by the SAP broadphase,
+        // which means a sleeping construct object will be invisible to the mecha's physics body.
+        body.linearDamping = 0.65;
+        body.angularDamping = 0.80;
         // Assign construct physics material for mecha↔construct ContactMaterial
         body.material = this.physicsWorld.getConstructMaterial();
         // Group 2 — visible to environment (1) AND mecha (4)

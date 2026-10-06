@@ -6,7 +6,7 @@ export class PhysicsWorld {
         this.world = new CANNON.World();
         this.world.gravity.set(0, -9.82, 0); // Earth gravity
         this.world.broadphase = new CANNON.SAPBroadphase(this.world);
-        this.world.solver.iterations = 10;
+        this.world.solver.iterations = 15;
 
         // Physics materials
         this.defaultMaterial = new CANNON.Material('default');
