@@ -98,6 +98,37 @@ export class MechaController {
                     this.slopeSlideForce = null;
                 }
             }
+
+            // 3. SCENARIO: Mecha collides with construct object horizontally
+            const isConstruct = (otherBody.isConstruct || otherBody.collisionFilterGroup === 2);
+            if (isConstruct && !otherIsBelow) {
+                if (this.isBoosting) {
+                    // WITH 'SHIFT' BOOST: unlock construct object and ram it forward!
+                    if (otherBody.type === CANNON.Body.STATIC) {
+                        otherBody.type = CANNON.Body.DYNAMIC;
+                        otherBody.mass = otherBody.userDataMass || 100;
+                        otherBody.updateMassProperties();
+                    }
+                    otherBody.isRestingOnGround = false;
+                    otherBody.wakeUp();
+
+                    const mechaSpeed = Math.hypot(this.body.velocity.x, this.body.velocity.z);
+                    const pushDir = new CANNON.Vec3(this.body.velocity.x, 0, this.body.velocity.z);
+                    if (pushDir.lengthSquared() > 0.01) {
+                        pushDir.normalize();
+                        const massFactor = Math.min(1.0, 150 / (otherBody.mass || 100));
+                        const pushMagnitude = Math.max(25, mechaSpeed * 85 * massFactor);
+                        otherBody.applyImpulse(pushDir.scale(pushMagnitude), otherBody.position);
+                    }
+                } else {
+                    // WITHOUT BOOST: normal walking cannot move it; lock as static if resting
+                    if (otherBody.isRestingOnGround) {
+                        otherBody.type = CANNON.Body.STATIC;
+                        otherBody.velocity.set(0, 0, 0);
+                        otherBody.angularVelocity.set(0, 0, 0);
+                    }
+                }
+            }
         });
 
         this.lastShotTime = 0;
@@ -351,6 +382,10 @@ export class MechaController {
         if (this.mechaModel) {
             this.mechaModel.position.y = 2.35 - this.impactDip;
         }
+
+        // ── Sprint / Flight Boost State ───────────────────────────────────────
+        this.isBoosting = !!inputManager.isBoosting || !!inputManager.keys['shift'] || !!(inputManager.actions?.['flightBoost']);
+
         // ── Flight Mode: override gravity and apply 3D movement ───────────────
         if (this.flightActive) {
             this._updateFlight(inputManager, dt, cameraMode);
@@ -372,10 +407,12 @@ export class MechaController {
             if (inputManager.keys['a']) moveDir.sub(right);
             if (inputManager.keys['d']) moveDir.add(right);
 
+            const currentSpeed = this.isBoosting ? this.speed * 2.2 : this.speed;
+
             if (moveDir.lengthSq() > 0) {
                 moveDir.normalize();
-                this.body.velocity.x = moveDir.x * this.speed;
-                this.body.velocity.z = moveDir.z * this.speed;
+                this.body.velocity.x = moveDir.x * currentSpeed;
+                this.body.velocity.z = moveDir.z * currentSpeed;
 
                 // Smoothly rotate mecha to face movement direction
                 const angle = Math.atan2(moveDir.x, moveDir.z);
@@ -390,6 +427,45 @@ export class MechaController {
                 // Apply friction manually if not moving on flat ground
                 this.body.velocity.x *= 0.8;
                 this.body.velocity.z *= 0.8;
+            }
+
+            // Continuous contact check: ensure resting construct objects stay immovable unless boosting
+            if (this.physicsWorld && this.physicsWorld.world && this.physicsWorld.world.contacts) {
+                const contacts = this.physicsWorld.world.contacts;
+                for (let i = 0; i < contacts.length; i++) {
+                    const c = contacts[i];
+                    if (c.bi === this.body || c.bj === this.body) {
+                        const other = (c.bi === this.body) ? c.bj : c.bi;
+                        if (other.isConstruct || other.collisionFilterGroup === 2) {
+                            const otherIsBelow = other.position.y < (this.body.position.y + 0.4);
+                            if (!otherIsBelow) {
+                                if (this.isBoosting) {
+                                    if (other.type === CANNON.Body.STATIC) {
+                                        other.type = CANNON.Body.DYNAMIC;
+                                        other.mass = other.userDataMass || 100;
+                                        other.updateMassProperties();
+                                    }
+                                    other.isRestingOnGround = false;
+                                    other.wakeUp();
+                                    const mechaSpeed = Math.hypot(this.body.velocity.x, this.body.velocity.z);
+                                    const pushDir = new CANNON.Vec3(this.body.velocity.x, 0, this.body.velocity.z);
+                                    if (pushDir.lengthSquared() > 0.01) {
+                                        pushDir.normalize();
+                                        const massFactor = Math.min(1.0, 150 / (other.mass || 100));
+                                        const pushMagnitude = Math.max(25, mechaSpeed * 85 * massFactor);
+                                        other.applyImpulse(pushDir.scale(pushMagnitude), other.position);
+                                    }
+                                } else {
+                                    if (other.isRestingOnGround) {
+                                        other.type = CANNON.Body.STATIC;
+                                        other.velocity.set(0, 0, 0);
+                                        other.angularVelocity.set(0, 0, 0);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             }
 
             // Jump

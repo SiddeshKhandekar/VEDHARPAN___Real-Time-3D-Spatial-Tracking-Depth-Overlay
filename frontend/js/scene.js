@@ -910,7 +910,7 @@ class DioramaScene {
                         this.mechaController.constructMode = this.constructMode;
                         this.mechaController.mechaModel = this.mechaModel;
                         if (this.constructMode) {
-                            this.constructMode.setMecha(this.mechaWrapper);
+                            this.constructMode.setMecha(this.mechaWrapper, this.mechaController);
                         }
 
                         // Attach engine plume particles

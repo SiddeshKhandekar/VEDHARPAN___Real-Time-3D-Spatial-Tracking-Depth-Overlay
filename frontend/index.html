@@ -7,6 +7,11 @@
     <title>VEDHARPAN 3D Viewport</title>
     <link rel="stylesheet" href="css/style.css">
     <link rel="stylesheet" href="css/settings_panel.css">
+    <style>
+        .hidden {
+            display: none !important;
+        }
+    </style>
 
     <!-- ES Module Import Map for Three.js and loaders -->
     <script type="importmap">
@@ -77,44 +82,74 @@
         style="position:fixed;bottom:24px;left:24px;font-family:'Orbitron',monospace;color:#00f2fe;font-size:0.9rem;font-weight:bold;text-shadow:0 0 8px #00f2fe;pointer-events:none;z-index:9000;letter-spacing:2px;background:rgba(0,0,0,0.55);padding:6px 14px;border-radius:6px;border:1px solid rgba(0,242,254,0.35);">
         POINTS: 100/100</div>
 
-    <!-- Construct Mode Force Meter (charge-hold-release fire indicator) -->
-    <div id="force-meter-wrap" class="hidden" style="
-        position:fixed;
-        right:28px;
-        bottom:250px;
-        width:18px;
-        height:160px;
-        background:rgba(0,0,0,0.55);
-        border:1px solid rgba(0,242,254,0.4);
-        border-radius:9px;
-        overflow:hidden;
-        display:flex;
-        flex-direction:column-reverse;
-        align-items:center;
-        pointer-events:none;
-        z-index:9001;
+    <!-- Construct Mode Force Meter (elongated vertically, minimal gap above firing modes, overcharge vibration, and yellow blinking auto-release feedback) -->
+    <div id="force-meter-container" class="hidden" style="
+        position: fixed;
+        right: 36px;
+        bottom: 230px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 6px;
+        pointer-events: none;
+        z-index: 9001;
     ">
-        <div id="force-meter-fill" style="
-            width:100%;
-            height:0%;
-            background:#00f2fe;
-            border-radius:9px;
-            transition:height 0.04s linear;
-            box-shadow:0 0 8px rgba(0,242,254,0.8);
-        "></div>
+        <div id="force-meter-msg" class="hidden" style="
+            font-family: 'Orbitron', monospace;
+            font-size: 0.72rem;
+            font-weight: 900;
+            color: #ffee00;
+            letter-spacing: 2.5px;
+            text-shadow: 0 0 10px #ffee00, 0 0 20px #ffbb00;
+            text-align: center;
+            width: 100px;
+        ">RELEASED</div>
+
+        <div id="force-meter-pct" style="
+            font-family: 'Orbitron', monospace;
+            font-size: 0.88rem;
+            font-weight: bold;
+            color: #00f2fe;
+            letter-spacing: 1px;
+            text-shadow: 0 0 10px #00f2fe;
+            text-align: center;
+            width: 70px;
+        ">0%</div>
+
+        <div id="force-meter-wrap" style="
+            width: 24px;
+            height: min(480px, calc(100vh - 315px));
+            background: rgba(4, 10, 22, 0.75);
+            backdrop-filter: blur(10px);
+            border: 1.5px solid rgba(0, 242, 254, 0.55);
+            border-radius: 12px;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column-reverse;
+            align-items: center;
+            box-shadow: 0 0 24px rgba(0, 242, 254, 0.25), inset 0 0 10px rgba(0, 0, 0, 0.85);
+        ">
+            <div id="force-meter-fill" style="
+                width: 100%;
+                height: 0%;
+                background: #00f2fe;
+                border-radius: 10px;
+                transition: height 0.04s linear;
+                box-shadow: 0 0 16px rgba(0, 242, 254, 0.9);
+            "></div>
+        </div>
+
+        <div id="force-meter-label" style="
+            font-family: 'Orbitron', monospace;
+            font-size: 0.65rem;
+            font-weight: bold;
+            color: #00f2fe;
+            letter-spacing: 2px;
+            text-shadow: 0 0 8px #00f2fe;
+            text-align: center;
+            width: 75px;
+        ">FORCE</div>
     </div>
-    <div id="force-meter-label" class="hidden" style="
-        position:fixed;
-        right:20px;
-        bottom:222px;
-        font-family:'Orbitron',monospace;
-        font-size:0.6rem;
-        color:#00f2fe;
-        letter-spacing:2px;
-        pointer-events:none;
-        z-index:9001;
-        text-shadow:0 0 6px #00f2fe;
-    ">FORCE</div>
 
     <!-- Crosshair -->
     <div id="crosshair"></div>

@@ -23,6 +23,7 @@ export class InputManager {
             's': false,
             'd': false,
             ' ': false,
+            'shift': false,
         };
 
         this.mouseState = {
@@ -82,6 +83,11 @@ export class InputManager {
         this._keyToAction = keyToActionMap;
     }
 
+    /** Returns true if player is holding Shift or boost action is triggered */
+    get isBoosting() {
+        return !!this.keys['shift'] || !!this.actions?.['flightBoost'];
+    }
+
     _resolveKeydown(e) {
         const k = e.key.toLowerCase();
         const code = e.code.toLowerCase();
@@ -91,6 +97,12 @@ export class InputManager {
         }
 
         const action = this._keyToAction[k] || this._keyToAction[code];
+
+        // ── Sprint / Flight Boost (Shift) ─────────────────────
+        if (k === 'shift' || code === 'shiftleft' || code === 'shiftright' || e.shiftKey) {
+            this.keys['shift'] = true;
+            this.actions['flightBoost'] = true;
+        }
 
         // ── Movement ───────────────────────────────────────────
         if (action === 'moveForward') { this.keys['w'] = true; return; }
@@ -118,6 +130,11 @@ export class InputManager {
         const code = e.code.toLowerCase();
         const action = this._keyToAction[k] || this._keyToAction[code];
 
+        if (k === 'shift' || code === 'shiftleft' || code === 'shiftright') {
+            this.keys['shift'] = false;
+            this.actions['flightBoost'] = false;
+        }
+
         if (action === 'moveForward') { this.keys['w'] = false; }
         if (action === 'moveBackward') { this.keys['s'] = false; }
         if (action === 'moveLeft') { this.keys['a'] = false; }
@@ -133,12 +150,12 @@ export class InputManager {
         window.addEventListener('keydown', (e) => this._resolveKeydown(e));
         window.addEventListener('keyup', (e) => this._resolveKeyup(e));
 
-        this.domElement.addEventListener('mousedown', (e) => {
+        window.addEventListener('mousedown', (e) => {
             if (e.button === 0) { this.mouseState.left = true; this._mouseJustPressed = true; }
             if (e.button === 2) this.mouseState.right = true;
         });
 
-        this.domElement.addEventListener('mouseup', (e) => {
+        window.addEventListener('mouseup', (e) => {
             if (e.button === 0) this.mouseState.left = false;
             if (e.button === 2) this.mouseState.right = false;
         });
@@ -190,13 +207,17 @@ export class InputManager {
         } else {
             // Fallback to mouse
             this.aimActive = this.mouseState.right;
-            // Mode 2 (Rapid) = hold to fire continuously; all others = single click per shot
-            this.isShooting = (this.fireMode === 2)
-                ? this.mouseState.left
-                : this._mouseJustPressed;
+            // Mode 2 (Rapid) = hold to fire continuously; Mode 4 (Construct) = handled by ConstructMode charge/release; all others = single click per shot
+            if (this.fireMode === 4) {
+                this.isShooting = false;
+            } else if (this.fireMode === 2) {
+                this.isShooting = this.mouseState.left;
+            } else {
+                this.isShooting = this._mouseJustPressed;
+            }
             this._mouseJustPressed = false; // consumed — clear every frame
 
-            if (this.aimActive || this.isShooting) {
+            if (this.aimActive || this.isShooting || this.fireMode === 4) {
                 // Determine raycast origin: (0,0) in pointer lock modes, else real mousePos
                 const rayPos = (cameraMode !== 0) ? new THREE.Vector2(0, 0) : this.mousePos;
 
