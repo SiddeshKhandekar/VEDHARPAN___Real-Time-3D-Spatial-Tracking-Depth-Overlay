@@ -908,6 +908,10 @@ class DioramaScene {
 
                         // Wire ConstructMode reference so mode 4 shoot delegates correctly
                         this.mechaController.constructMode = this.constructMode;
+                        this.mechaController.mechaModel = this.mechaModel;
+                        if (this.constructMode) {
+                            this.constructMode.setMecha(this.mechaWrapper);
+                        }
 
                         // Attach engine plume particles
                         this.mechaController.loadPlumes(loader);

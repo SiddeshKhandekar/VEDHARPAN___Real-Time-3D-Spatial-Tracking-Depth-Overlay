@@ -10,14 +10,21 @@ export class MechaController {
         this.muzzleFlash = muzzleFlash;
         this.createProjectile = createProjectile;
 
-        // Physics Body for the mecha (Capsule-like approximated by a Sphere for robust trimesh collision)
-        const radius = 0.5;
+        // Physics Body for the mecha: Compound capsule approximation covering feet (Y=0) to head (Y=3.75)
         this.body = new CANNON.Body({
             mass: 80, // kg
-            shape: new CANNON.Sphere(radius),
             position: new CANNON.Vec3(0, 5, 2),
             fixedRotation: true // Prevent falling over
         });
+
+        // 1. Feet sphere (handles stairs, trimesh floor, standing on construct objects)
+        this.body.addShape(new CANNON.Sphere(0.50), new CANNON.Vec3(0, 0.50, 0));
+        // 2. Pelvis / Lower torso sphere
+        this.body.addShape(new CANNON.Sphere(0.65), new CANNON.Vec3(0, 1.50, 0));
+        // 3. Upper torso / Chest sphere
+        this.body.addShape(new CANNON.Sphere(0.75), new CANNON.Vec3(0, 2.40, 0));
+        // 4. Head sphere (top of mecha)
+        this.body.addShape(new CANNON.Sphere(0.55), new CANNON.Vec3(0, 3.20, 0));
 
         // Add physics body to world
         // Mecha is Group 4, collides with Environment (1) and Construct objects (2)
@@ -34,13 +41,62 @@ export class MechaController {
         this.canJump = true; // allow first jump once grounded
 
         this.aimTarget = new THREE.Vector3();
+        this.mechaModel = null; // Bound from scene.js for impact animations
+        this.impactDip = 0.0;
+        this.onSteepSlope = false;
+        this.slopeSlideForce = null;
 
-        // Collision listener for jumping — reset canJump when landing
+        // Collision listener: handle jumping, ground detection, downward impacts, and slopes
         this.body.addEventListener("collide", (e) => {
-            const contact = e.contact;
-            // ni points from bj→bi; check both signs since role of bi/bj varies
-            if (Math.abs(contact.ni.y) > 0.5) {
+            const isBi = (e.contact.bi === this.body);
+            const otherBody = isBi ? e.contact.bj : e.contact.bi;
+
+            // Determine if the contact is coming from above or below
+            const otherIsAbove = otherBody.position.y > (this.body.position.y + 0.5);
+            const otherIsBelow = otherBody.position.y < (this.body.position.y + 0.4);
+
+            // 1. SCENARIO: Falling object strikes Mecha from ABOVE
+            if (otherIsAbove && (otherBody.collisionFilterGroup === 2 || otherBody.mass > 10)) {
+                const relVelY = otherBody.velocity.y - this.body.velocity.y;
+                if (relVelY < -0.3) {
+                    // Drive mecha downward with the 3D object
+                    this.body.velocity.y += relVelY * 0.7;
+                    this.body.velocity.x += (otherBody.velocity.x - this.body.velocity.x) * 0.3;
+                    this.body.velocity.z += (otherBody.velocity.z - this.body.velocity.z) * 0.3;
+
+                    // Trigger visual impact compression on mecha model
+                    this.triggerImpactDip(Math.min(0.5, Math.abs(relVelY) * 0.08));
+
+                    // If mecha was in flight, drag it down with the falling object
+                    if (this.flightActive) {
+                        this.body.velocity.y = Math.min(this.body.velocity.y, otherBody.velocity.y);
+                    }
+                }
+            }
+
+            // 2. SCENARIO: Mecha stands on ground or construct object
+            if (otherIsBelow) {
                 this.canJump = true;
+
+                // Check slope angle of the contact surface
+                let isTilted = false;
+                if (otherBody.quaternion) {
+                    const up = new THREE.Vector3(0, 1, 0).applyQuaternion(
+                        new THREE.Quaternion(otherBody.quaternion.x, otherBody.quaternion.y, otherBody.quaternion.z, otherBody.quaternion.w)
+                    );
+                    if (Math.abs(up.y) < 0.90) {
+                        isTilted = true;
+                        // Slope slide vector
+                        const grav = new THREE.Vector3(0, -9.82, 0);
+                        const slide = grav.projectOnPlane(up);
+                        this.onSteepSlope = true;
+                        this.slopeSlideForce = slide.multiplyScalar(0.7);
+                    }
+                }
+                if (!isTilted) {
+                    this.onSteepSlope = false;
+                    this.slopeSlideForce = null;
+                }
             }
         });
 
@@ -285,6 +341,16 @@ export class MechaController {
 
     update(inputManager, dt, cameraMode = 1) {
         if (this.shieldWireLOD) this.shieldWireLOD.update(this.camera);
+
+        // Visual impact compression recovery
+        if (this.impactDip > 0.001) {
+            this.impactDip *= Math.pow(0.85, dt * 60);
+        } else {
+            this.impactDip = 0.0;
+        }
+        if (this.mechaModel) {
+            this.mechaModel.position.y = 2.35 - this.impactDip;
+        }
         // ── Flight Mode: override gravity and apply 3D movement ───────────────
         if (this.flightActive) {
             this._updateFlight(inputManager, dt, cameraMode);
@@ -316,8 +382,12 @@ export class MechaController {
                 const targetQuat = new CANNON.Quaternion();
                 targetQuat.setFromAxisAngle(new CANNON.Vec3(0, 1, 0), angle);
                 this.body.quaternion.slerp(targetQuat, 0.15, this.body.quaternion);
+            } else if (this.onSteepSlope && this.slopeSlideForce) {
+                // Physically slide down the slope according to gravity
+                this.body.velocity.x += this.slopeSlideForce.x * dt;
+                this.body.velocity.z += this.slopeSlideForce.z * dt;
             } else {
-                // Apply friction manually if not moving
+                // Apply friction manually if not moving on flat ground
                 this.body.velocity.x *= 0.8;
                 this.body.velocity.z *= 0.8;
             }
@@ -952,6 +1022,14 @@ export class MechaController {
         } else {
             this.createProjectile(barrelPos, shootDir, fireMode);
         }
+    }
+
+    /**
+     * Compress the mecha model visually on downward impact (knees buckle under weight).
+     * @param {number} amount Compression depth in units (clamped to 0.5)
+     */
+    triggerImpactDip(amount) {
+        this.impactDip = Math.min(0.5, this.impactDip + (amount || 0.2));
     }
 
     /**

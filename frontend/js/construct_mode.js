@@ -137,8 +137,17 @@ export class ConstructMode {
         // Cooldown timer HUD span (inline in #construct-points)
         this._timerSpan = document.getElementById('construct-cooldown-timer');
 
+        // Mecha reference for depth anchoring
+        this.mecha = null;
+        this._extruding = false;
+
         this._initStrokeLine();
         console.log('[ConstructMode] Initialised');
+    }
+
+    /** Bind Mecha 3D wrapper reference so drawing plane matches Mecha depth */
+    setMecha(mechaMesh) {
+        this.mecha = mechaMesh;
     }
 
     // ─── Lifecycle ────────────────────────────────────────────────────────────
@@ -213,38 +222,12 @@ export class ConstructMode {
         if (!this.active) return;
 
         // Head aiming drives orbit
-        if (this.state === STATES.AIMING && this._latestHead) {
+        if (this._latestHead && this._applyHeadAim) {
             this._applyHeadAim(dt);
-            this._syncObjectToAim();
         }
 
-        // Arrow-key rotation of the pending object
-        if (this.state === STATES.AIMING) {
-            this._applyArrowRotation();
-        }
-
-        // Force meter charging (poll live mouse state every frame)
-        if (this.state === STATES.AIMING && this._input) {
-            const lmb = this._input.mouseState?.left ?? false;
-
-            if (lmb) {
-                // Button is held — accumulate charge
-                if (this._chargeStart === null) {
-                    this._chargeStart = performance.now();
-                }
-                this._charge = Math.min(
-                    (performance.now() - this._chargeStart) / CHARGE_MAX_MS,
-                    1.0
-                );
-                this._updateForceMeter(this._charge);
-            } else if (this._chargeStart !== null) {
-                // Button just released — fire!
-                this._fireWithCharge(this._charge);
-                this._chargeStart = null;
-                this._charge = 0;
-                this._hideForceMeter();
-            }
-        }
+        // Arrow-key rotation applies physical angular momentum to the most recent construct object
+        this._applyArrowRotation();
     }
 
     // ─── Right Hand: Drawing ──────────────────────────────────────────────────
@@ -276,9 +259,16 @@ export class ConstructMode {
 
         const camForward = new THREE.Vector3();
         this.camera.getWorldDirection(camForward);
-        const planeOrigin = this.camera.position.clone()
-            .addScaledVector(camForward, DRAW_PLANE_DEPTH);
         const planeNormal = camForward.clone().negate();
+
+        // Dynamically anchor the drawing plane to pass directly through the Mecha's position in 3D world space!
+        // This ensures drawing above the mecha on screen places the 3D stroke points directly above the mecha.
+        let planeOrigin;
+        if (this.mecha && this.mecha.position) {
+            planeOrigin = this.mecha.position.clone().add(new THREE.Vector3(0, 2.0, 0));
+        } else {
+            planeOrigin = this.camera.position.clone().addScaledVector(camForward, 5.0);
+        }
 
         let worldPoint;
         const denom = planeNormal.dot(dir);
@@ -286,7 +276,7 @@ export class ConstructMode {
             const t = planeNormal.dot(planeOrigin.clone().sub(this.camera.position)) / denom;
             worldPoint = this.camera.position.clone().addScaledVector(dir, t);
         } else {
-            worldPoint = this.camera.position.clone().addScaledVector(dir, 3.0);
+            worldPoint = this.camera.position.clone().addScaledVector(dir, 5.0);
         }
 
         // ── Min-distance filter: skip if too close to last point ──────────────
@@ -311,17 +301,16 @@ export class ConstructMode {
 
             // Allow extrusion from DRAWING state, OR from IDLE if the user already
             // drew ≥3 points and lifted their right finger before making a fist.
-            const canExtrude = this.state === STATES.DRAWING ||
-                (this.state === STATES.IDLE && this._strokePoints.length >= 3);
+            const canExtrude = (this.state === STATES.DRAWING || this.state === STATES.IDLE) &&
+                this._strokePoints.length >= 3 &&
+                !this._extruding;
 
             if (held >= FIST_HOLD_MS && canExtrude) {
-                if (this._strokePoints.length >= 3) {
-                    this._convertStrokeTo3D();  // transitions to OBJECT_READY → AIMING
-                } else {
-                    console.warn('[ConstructMode] Fist locked but stroke too short (< 3 points) — keep drawing first');
-                }
+                this._extruding = true;
+                this._convertStrokeTo3D();  // Immediately spawns dynamic physics object!
+                this._fistStart = null;
+                setTimeout(() => { this._extruding = false; }, 800); // 800ms gesture debounce
             } else if (held >= FIST_HOLD_MS && this._strokePoints.length === 0) {
-                // Fist held but no points drawn at all — inform user
                 console.debug('[ConstructMode] Fist held — no stroke points yet; point your right index finger to draw first.');
             }
         } else {
@@ -412,73 +401,77 @@ export class ConstructMode {
         mesh.position.copy(centroid);
         this.scene.add(mesh);
 
-        // Build Cannon.js body
-        const posArr = geometry.attributes.position.array;
-        const uniqueMap = new Map();
-        const cannonVerts = [];
-        for (let i = 0; i < posArr.length; i += 3) {
-            const key = `${posArr[i].toFixed(3)}_${posArr[i + 1].toFixed(3)}_${posArr[i + 2].toFixed(3)}`;
-            if (!uniqueMap.has(key)) {
-                uniqueMap.set(key, cannonVerts.length);
-                cannonVerts.push(new CANNON.Vec3(posArr[i], posArr[i + 1], posArr[i + 2]));
-            }
-        }
-        const cannonFaces = [];
-        const idx = geometry.index ? geometry.index.array : null;
-        if (idx) {
-            for (let i = 0; i < idx.length; i += 3) {
-                const verts = [idx[i], idx[i + 1], idx[i + 2]].map(vi => {
-                    const key = `${posArr[vi * 3].toFixed(3)}_${posArr[vi * 3 + 1].toFixed(3)}_${posArr[vi * 3 + 2].toFixed(3)}`;
-                    return uniqueMap.get(key);
-                });
-                if (new Set(verts).size === 3) cannonFaces.push(verts);
-            }
-        }
+        geometry.computeBoundingBox();
+        const bb = geometry.boundingBox;
+        const hw = Math.max(0.15, (bb.max.x - bb.min.x) / 2);
+        const hh = Math.max(0.15, (bb.max.y - bb.min.y) / 2);
+        const hd = Math.max(0.15, (bb.max.z - bb.min.z) / 2);
 
-        let body;
-        if (cannonFaces.length > 0 && cannonVerts.length >= 4) {
-            try {
-                const cs = new CANNON.ConvexPolyhedron({ vertices: cannonVerts, faces: cannonFaces });
-                body = new CANNON.Body({ mass: 5, shape: cs });
-            } catch (e) {
-                console.warn('[ConstructMode] ConvexPolyhedron fallback:', e.message);
-            }
-        }
-        if (!body) {
-            geometry.computeBoundingBox();
-            const bb = geometry.boundingBox;
-            const hw = (bb.max.x - bb.min.x) / 2;
-            const hh = (bb.max.y - bb.min.y) / 2;
-            const hd = (bb.max.z - bb.min.z) / 2;
-            body = new CANNON.Body({ mass: 5, shape: new CANNON.Box(new CANNON.Vec3(hw, hh, hd)) });
-        }
+        // Calculate realistic mass based on extruded physical volume (density ~ 70 kg/m^3)
+        const volume = (hw * 2) * (hh * 2) * (hd * 2);
+        const mass = Math.max(50, Math.min(350, volume * 70));
 
-        body.position.copy(mesh.position);
-        body.quaternion.copy(mesh.quaternion);
-        // High damping keeps the object from sliding endlessly after landing.
-        // Do NOT enable allowSleep — sleeping bodies are skipped by the SAP broadphase,
-        // which means a sleeping construct object will be invisible to the mecha's physics body.
-        body.linearDamping = 0.65;
-        body.angularDamping = 0.80;
-        // Assign construct physics material for mecha↔construct ContactMaterial
+        const body = new CANNON.Body({
+            mass: mass,
+            position: new CANNON.Vec3(mesh.position.x, mesh.position.y, mesh.position.z),
+            quaternion: new CANNON.Quaternion(mesh.quaternion.x, mesh.quaternion.y, mesh.quaternion.z, mesh.quaternion.w)
+        });
+
+        // 1. Primary Box shape: provides solid flat surfaces for Mecha to stand on and slide over
+        body.addShape(new CANNON.Box(new CANNON.Vec3(hw, hh, hd)));
+
+        // 2. Corner and bottom contact spheres: enables collision against static CANNON.Trimesh environment (floors & stairs)
+        const sphereR = Math.min(0.2, hw * 0.4, hh * 0.4, hd * 0.4);
+        const sphereOffsets = [
+            // Bottom face corners & center
+            new CANNON.Vec3(-hw + sphereR, -hh + sphereR, -hd + sphereR),
+            new CANNON.Vec3( hw - sphereR, -hh + sphereR, -hd + sphereR),
+            new CANNON.Vec3(-hw + sphereR, -hh + sphereR,  hd - sphereR),
+            new CANNON.Vec3( hw - sphereR, -hh + sphereR,  hd - sphereR),
+            new CANNON.Vec3(0, -hh + sphereR, 0),
+            // Top face corners (for upside-down landing or tumbling)
+            new CANNON.Vec3(-hw + sphereR,  hh - sphereR, -hd + sphereR),
+            new CANNON.Vec3( hw - sphereR,  hh - sphereR, -hd + sphereR),
+            new CANNON.Vec3(-hw + sphereR,  hh - sphereR,  hd - sphereR),
+            new CANNON.Vec3( hw - sphereR,  hh - sphereR,  hd - sphereR),
+        ];
+        sphereOffsets.forEach(offset => {
+            body.addShape(new CANNON.Sphere(sphereR), offset);
+        });
+
+        body.linearDamping = 0.35;
+        body.angularDamping = 0.50;
         body.material = this.physicsWorld.getConstructMaterial();
-        // Group 2 — visible to environment (1) AND mecha (4)
+
+        // Group 2 — collides with Environment (1) AND Mecha (4)
         body.collisionFilterGroup = 2;
         body.collisionFilterMask = 1 | 4;
-        body.type = CANNON.Body.KINEMATIC;  // stays frozen until fired
-        body.velocity.set(0, 0, 0);
+
+        // DYNAMIC PHYSICS: subject to gravity, velocity, momentum and collision immediately!
+        body.type = CANNON.Body.DYNAMIC;
+        body.velocity.set(0, -0.5, 0); // Slight downward velocity to initiate immediate gravitational fall
         this.physicsWorld.world.addBody(body);
 
-        this._constructObjects.push({ mesh, body, fired: false, timeout: null, firedAt: null });
+        const constructObj = {
+            mesh,
+            body,
+            fired: true,
+            createdAt: performance.now(),
+            firedAt: performance.now(),
+            timeout: null
+        };
+        constructObj.timeout = setTimeout(() => this._despawnObject(constructObj), LIFETIME_MS);
+        this._constructObjects.push(constructObj);
 
         // Clear the drawn stroke
         this._clearStrokeLine();
         this._strokePoints = [];
 
-        // Auto-enter AIMING
-        this.state = STATES.AIMING;
+        // Return to IDLE so user can immediately draw another construct or interact
+        this.state = STATES.IDLE;
+        this.pointsRemaining = MAX_POINTS;
         this._updateHUD();
-        console.log('[ConstructMode] Object ready — STATE: AIMING');
+        console.log(`[ConstructMode] 3D Physics Object created! Mass: ${mass.toFixed(1)}kg, Volume: ${volume.toFixed(2)}m³`);
     }
 
     // ─── Force-Meter Fire ─────────────────────────────────────────────────────
@@ -505,8 +498,22 @@ export class ConstructMode {
         console.log(`[ConstructMode] FIRED — speed ${speed.toFixed(1)} u/s (charge ${(charge * 100).toFixed(0)}%)`);
     }
 
-    /** Legacy hook kept so MechaController's fire() call is a no-op in Mode 4 */
-    fire() { return false; }
+    /** When fired (e.g. left click in Mode 4), apply a physical kinetic forward launch impulse to the active construct */
+    fire() {
+        const obj = this._constructObjects[this._constructObjects.length - 1];
+        if (obj && obj.body) {
+            const dir = new THREE.Vector3();
+            this.camera.getWorldDirection(dir);
+            obj.body.wakeUp();
+            obj.body.applyImpulse(
+                new CANNON.Vec3(dir.x * 300, dir.y * 300 + 80, dir.z * 300),
+                new CANNON.Vec3(0, 0, 0)
+            );
+            console.log('[ConstructMode] Applied physical forward impulse to construct object');
+            return true;
+        }
+        return false;
+    }
 
     // ─── Head Aiming ──────────────────────────────────────────────────────────
 
@@ -526,24 +533,15 @@ export class ConstructMode {
         }
     }
 
-    _syncObjectToAim() {
-        const obj = this._constructObjects.find(o => !o.fired);
-        if (!obj) return;
-        const dir = new THREE.Vector3();
-        this.camera.getWorldDirection(dir);
-        const targetPos = this.camera.position.clone().addScaledVector(dir, 4.0);
-        obj.mesh.position.lerp(targetPos, 0.12);
-        obj.body.position.copy(obj.mesh.position);
-    }
-
+    /** Apply physical angular velocity on the most recent construct object via arrow keys */
     _applyArrowRotation() {
-        const obj = this._constructObjects.find(o => !o.fired);
-        if (!obj) return;
-        if (this.arrowLeft) obj.mesh.rotateY(-ROTATION_INCREMENT);
-        if (this.arrowRight) obj.mesh.rotateY(+ROTATION_INCREMENT);
-        if (this.arrowUp) obj.mesh.rotateX(-ROTATION_INCREMENT);
-        if (this.arrowDown) obj.mesh.rotateX(+ROTATION_INCREMENT);
-        obj.body.quaternion.copy(obj.mesh.quaternion);
+        const obj = this._constructObjects[this._constructObjects.length - 1];
+        if (!obj || !obj.body) return;
+        obj.body.wakeUp();
+        if (this.arrowLeft) obj.body.angularVelocity.y -= 2.0;
+        if (this.arrowRight) obj.body.angularVelocity.y += 2.0;
+        if (this.arrowUp) obj.body.angularVelocity.x -= 2.0;
+        if (this.arrowDown) obj.body.angularVelocity.x += 2.0;
     }
 
     // ─── Lifetime & Despawn ───────────────────────────────────────────────────
@@ -552,18 +550,10 @@ export class ConstructMode {
         const now = performance.now();
         for (let i = this._constructObjects.length - 1; i >= 0; i--) {
             const obj = this._constructObjects[i];
-            if (!obj.fired) continue;
 
-            // Sync THREE mesh to physics body
+            // Continuously sync THREE mesh to dynamic physics body every single frame
             obj.mesh.position.copy(obj.body.position);
             obj.mesh.quaternion.copy(obj.body.quaternion);
-
-            // Safety: ensure body is DYNAMIC once fired
-            if (obj.body.type === CANNON.Body.KINEMATIC) {
-                obj.body.type = CANNON.Body.DYNAMIC;
-                obj.body.updateMassProperties();
-                obj.body.wakeUp();
-            }
 
             // Despawn if fallen below the world floor
             if (obj.body.position.y < DESPAWN_ALT) {
@@ -729,12 +719,12 @@ export class ConstructMode {
     _updateHUD() {
         if (!this._hudPoints) return;
         const labels = {
-            [STATES.IDLE]: '✋ IDLE — Point right index to draw',
-            [STATES.DRAWING]: '✏️ DRAWING — Hold left fist 0.4s to commit (any ≥3 pts)',
-            [STATES.OBJECT_READY]: '🟦 EXTRUDING...',
-            [STATES.AIMING]: '🎯 AIMING — Hold LMB to charge, release to fire',
-            [STATES.FIRED]: '🚀 FIRED',
-            [STATES.COOLDOWN]: '⏳ COOLDOWN — 30s recharge',
+            [STATES.IDLE]: '✋ IDLE — Point right index to draw in 3D',
+            [STATES.DRAWING]: '✏️ DRAWING — Hold left fist 0.4s to commit 3D physics object',
+            [STATES.OBJECT_READY]: '🟦 SPAWNING 3D PHYSICS OBJECT...',
+            [STATES.AIMING]: '🎯 3D PHYSICS ACTIVE',
+            [STATES.FIRED]: '🚀 3D PHYSICS OBJECT DEPLOYED',
+            [STATES.COOLDOWN]: '⏳ COOLDOWN — Recharging',
         };
         const label = labels[this.state] || this.state;
         // Re-inject innerHTML but preserve the timer span if it exists inside the div
