@@ -206,6 +206,22 @@ export class ConstructMode {
         this.active = false;
         this._clearStrokeLine();
         this._hideForceMeter();
+
+        // If an object was created and is pending in AIMING mode, release it into dynamic physics
+        const unfired = this._constructObjects.find(o => !o.fired);
+        if (unfired) {
+            unfired.fired = true;
+            unfired.firedAt = performance.now();
+            unfired.body.type = CANNON.Body.DYNAMIC;
+            unfired.body.mass = unfired.body.userDataMass || 100;
+            unfired.body.updateMassProperties();
+            unfired.body.wakeUp();
+            unfired.body.isRestingOnGround = false;
+            if (!unfired.timeout) {
+                unfired.timeout = setTimeout(() => this._despawnObject(unfired), LIFETIME_MS);
+            }
+        }
+
         this.state = STATES.IDLE;
         this._isMouseDown = false;
         this._chargeStart = null;
@@ -258,7 +274,7 @@ export class ConstructMode {
      */
     update(dt) {
         // Tick spawned object lifetime regardless of active state
-        this._tickObjectLifetime();
+        this._tickObjectLifetime(dt);
 
         // Tick auto-release yellow blinking feedback if active
         if (this._autoReleaseFeedbackEnd !== null) {
@@ -503,9 +519,9 @@ export class ConstructMode {
         body.angularDamping = 0.50;
         body.material = this.physicsWorld.getConstructMaterial();
 
-        // Group 2 — collides with Environment (1) AND Mecha (4)
+        // Group 2 — collides with Environment (1), Constructs (2), Mecha (4), and Projectiles (8)
         body.collisionFilterGroup = 2;
-        body.collisionFilterMask = 1 | 4;
+        body.collisionFilterMask = 1 | 2 | 4 | 8;
 
         // Frozen in place (KINEMATIC) during AIMING until fired with force meter
         body.type = CANNON.Body.KINEMATIC;
@@ -518,8 +534,14 @@ export class ConstructMode {
             fired: false,
             createdAt: performance.now(),
             firedAt: null,
-            timeout: null
+            lastHitTime: null,
+            timeout: null,
+            hitFlashIntensity: 0,
+            hitFlashColor: null
         };
+        body.constructObj = constructObj;
+        mesh.constructObj = constructObj;
+        mesh.name = 'construct_object';
         this._constructObjects.push(constructObj);
 
         // Clear the drawn stroke
@@ -710,12 +732,12 @@ export class ConstructMode {
 
     // ─── Lifetime & Despawn ───────────────────────────────────────────────────
 
-    _tickObjectLifetime() {
+    _tickObjectLifetime(dt = 0.016) {
         const now = performance.now();
         for (let i = this._constructObjects.length - 1; i >= 0; i--) {
             const obj = this._constructObjects[i];
 
-            if (obj.fired) {
+            if (obj.fired || !obj.body.isRestingOnGround || obj.body.type === CANNON.Body.DYNAMIC) {
                 // Continuously sync THREE mesh to dynamic physics body every single frame
                 obj.mesh.position.copy(obj.body.position);
                 obj.mesh.quaternion.copy(obj.body.quaternion);
@@ -728,7 +750,12 @@ export class ConstructMode {
 
                 // Check if the body has come to rest on the ground/surface
                 const speedSq = obj.body.velocity.lengthSquared() + obj.body.angularVelocity.lengthSquared();
-                if (!obj.body.isRestingOnGround && speedSq < 0.35 && (now - obj.firedAt > 800)) {
+                const timeSinceActivity = Math.max(
+                    obj.firedAt ? (now - obj.firedAt) : 0,
+                    obj.lastHitTime ? (now - obj.lastHitTime) : 0
+                );
+
+                if (!obj.body.isRestingOnGround && speedSq < 0.35 && timeSinceActivity > 800) {
                     obj.body.isRestingOnGround = true;
                     obj.body.liftFactor = 0;
                     // Lock as STATIC so ordinary mecha walking cannot push or budge it!
@@ -737,6 +764,19 @@ export class ConstructMode {
                     obj.body.angularVelocity.set(0, 0, 0);
                     obj.body.linearDamping = 0.35;
                     obj.body.angularDamping = 0.50;
+                }
+            }
+
+            // Recoil scale recovery animation
+            if (obj.mesh && (obj.mesh.scale.x !== 1 || obj.mesh.scale.y !== 1 || obj.mesh.scale.z !== 1)) {
+                obj.mesh.scale.lerp(new THREE.Vector3(1, 1, 1), Math.min(1.0, dt * 12.0));
+            }
+
+            // Hit flash decay animation
+            if (obj.hitFlashIntensity && obj.hitFlashIntensity > 0.02) {
+                obj.hitFlashIntensity = THREE.MathUtils.lerp(obj.hitFlashIntensity, 0, Math.min(1.0, dt * 7.0));
+                if (obj.mesh && obj.mesh.material) {
+                    obj.mesh.material.emissiveIntensity = 0.4 + obj.hitFlashIntensity;
                 }
             }
 
@@ -750,27 +790,27 @@ export class ConstructMode {
             if (obj.firedAt !== null) {
                 const remaining = LIFETIME_MS - (now - obj.firedAt);
                 if (remaining < STALE_WARN_MS) {
-                    // t goes 1 → 0 as the object approaches despawn
-                    const t = Math.max(0, remaining / STALE_WARN_MS);
-                    // Pulse frequency increases as it gets staler
-                    const pulse = (Math.sin(now * 0.004 * (1 + (1 - t) * 4)) + 1) / 2;
+                    // Only apply stale pulse if not currently flashing from a hit
+                    if (!obj.hitFlashIntensity || obj.hitFlashIntensity <= 0.1) {
+                        const t = Math.max(0, remaining / STALE_WARN_MS);
+                        const pulse = (Math.sin(now * 0.004 * (1 + (1 - t) * 4)) + 1) / 2;
+                        const mat = obj.mesh.material;
+                        mat.opacity = 0.15 + t * 0.40 + pulse * 0.15 * (1 - t);
+                        mat.emissive.setRGB(
+                            0.0 + (1 - t) * 0.9 + pulse * 0.3 * (1 - t),
+                            0.2 * t + (1 - t) * 0.25,
+                            0.2 * t
+                        );
+                        mat.emissiveIntensity = 0.4 + (1 - t) * 2.0;
+                    }
+                } else if (!obj.hitFlashIntensity || obj.hitFlashIntensity <= 0.05) {
+                    // Healthy default appearance
                     const mat = obj.mesh.material;
-                    // Opacity: fades from healthy 0.55 down to 0.15 with a pulse
-                    mat.opacity = 0.15 + t * 0.40 + pulse * 0.15 * (1 - t);
-                    // Emissive shifts from cyan to orange-red
-                    mat.emissive.setRGB(
-                        0.0 + (1 - t) * 0.9 + pulse * 0.3 * (1 - t),  // red rises
-                        0.2 * t + (1 - t) * 0.25,                       // green drops
-                        0.2 * t                                          // blue drops
-                    );
-                    mat.emissiveIntensity = 0.4 + (1 - t) * 2.0;
-                    mat.needsUpdate = false;  // geometry unchanged; no full recompile
-                } else {
-                    // Healthy — restore default appearance
-                    const mat = obj.mesh.material;
-                    mat.opacity = 0.55;
-                    mat.emissive.setHex(0x003344);
-                    mat.emissiveIntensity = 0.4;
+                    if (mat) {
+                        mat.opacity = 0.55;
+                        mat.emissive.setHex(0x003344);
+                        mat.emissiveIntensity = 0.4;
+                    }
                 }
             }
         }
@@ -786,6 +826,60 @@ export class ConstructMode {
         if (obj.body.world) this.physicsWorld.world.removeBody(obj.body);
         const idx = this._constructObjects.indexOf(obj);
         if (idx !== -1) this._constructObjects.splice(idx, 1);
+    }
+
+    /**
+     * Called when a projectile (Plasma, Rapid, Missile) impacts a construct object.
+     * Triggers visual hit flash and physical recoil deformation.
+     */
+    onConstructHit(constructObj, fireMode, hitDir) {
+        if (!constructObj || !constructObj.mesh) return;
+
+        constructObj.fired = true;
+        if (!constructObj.firedAt) constructObj.firedAt = performance.now();
+        constructObj.lastHitTime = performance.now();
+
+        // If currently in AIMING state, release it into the world
+        if (this.state === STATES.AIMING && this._constructObjects.includes(constructObj)) {
+            this._isMouseDown = false;
+            this._chargeStart = null;
+            this._fullCapacityStart = null;
+            this._charge = 0;
+            this._hideForceMeter();
+            this.state = STATES.FIRED;
+            this._updateHUD();
+            this._enterCooldown();
+        }
+
+        // Color and intensity based on weapon
+        let flashColor = 0xb833ff; // Mode 1: Plasma purple
+        let flashIntensity = 3.5;
+        const scalePunch = new THREE.Vector3(1.08, 0.92, 1.08);
+
+        if (fireMode === 1) { // Plasma
+            flashColor = 0xc040ff;
+            flashIntensity = 4.2;
+            scalePunch.set(1.10, 0.90, 1.10);
+        } else if (fireMode === 2) { // Rapid
+            flashColor = 0xffaa20;
+            flashIntensity = 2.8;
+            scalePunch.set(1.04, 0.96, 1.04);
+        } else if (fireMode === 3 || fireMode === 30) { // Missile
+            flashColor = 0xff2200;
+            flashIntensity = 5.5;
+            scalePunch.set(1.22, 0.78, 1.22);
+        }
+
+        constructObj.hitFlashIntensity = flashIntensity;
+        constructObj.hitFlashColor = flashColor;
+
+        if (constructObj.mesh.material) {
+            constructObj.mesh.material.emissive.setHex(flashColor);
+            constructObj.mesh.material.emissiveIntensity = flashIntensity;
+        }
+
+        // Recoil squish animation: momentarily deform, will lerp back to (1,1,1) in update
+        constructObj.mesh.scale.copy(scalePunch);
     }
 
     // ─── Cooldown ─────────────────────────────────────────────────────────────
@@ -820,7 +914,6 @@ export class ConstructMode {
         this.pointsRemaining = MAX_POINTS;
         this._strokePoints = [];
         this._fistStart = null;
-        this._constructObjects = [];
         this._clearStrokeLine();
         this._stopCooldownTimer();
         this._updateHUD();

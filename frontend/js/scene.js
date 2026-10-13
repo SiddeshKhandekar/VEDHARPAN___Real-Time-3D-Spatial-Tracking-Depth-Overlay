@@ -1884,8 +1884,8 @@ class DioramaScene {
         const radius = 0.35;
         const speed = 75.0; // Very fast
         const body = this.physicsWorld.addDynamicBody(mesh, 0.5, 'sphere', radius);
-        body.collisionFilterGroup = 2;
-        body.collisionFilterMask = 1;
+        body.collisionFilterGroup = 8;
+        body.collisionFilterMask = 1 | 2 | 4;
         body.ignoreGravity = true;
         body.linearDamping = 0.1;
 
@@ -1926,6 +1926,22 @@ class DioramaScene {
                 setTimeout(() => { this.scene.remove(trailLine); trailGeo.dispose(); trailMat.dispose(); }, 1500);
 
                 setTimeout(() => { if (body.world) this.physicsWorld.world.removeBody(body); }, 0);
+
+                // Apply Artificial Kinetic Impulse & Reaction to Dynamic targets & Construct objects
+                let targetBody = (e.contact.bi === body) ? e.contact.bj : e.contact.bi;
+                if (targetBody) {
+                    const hitDir = new THREE.Vector3(body.velocity.x, body.velocity.y, body.velocity.z);
+                    if (hitDir.lengthSq() > 0.01) {
+                        hitDir.normalize();
+                    } else {
+                        hitDir.copy(direction);
+                    }
+                    this._applyProjectileHitReaction(targetBody, expPos, hitDir, 3);
+                }
+
+                this.score += 25;
+                const scoreEl = document.getElementById('score');
+                if (scoreEl) scoreEl.textContent = this.score;
             }
         });
     }
@@ -1966,9 +1982,9 @@ class DioramaScene {
 
         const body = this.physicsWorld.addDynamicBody(mesh, 0.5, 'sphere', radius);
 
-        // Projectiles are Group 2, only collide with Environment (Group 1)
-        body.collisionFilterGroup = 2;
-        body.collisionFilterMask = 1;
+        // Projectiles are Group 8, collide with Environment/Props (1), Constructs (2), and Shield (4)
+        body.collisionFilterGroup = 8;
+        body.collisionFilterMask = 1 | 2 | 4;
 
         body.velocity.set(direction.x * speed, direction.y * speed, direction.z * speed);
         body.linearDamping = fireMode === 4 ? 0.6 : 0.0; // charged grenade has heavy air drag
@@ -2007,29 +2023,122 @@ class DioramaScene {
                     }
                 }, 0);
 
-                // Apply Artificial Kinetic Impulse to Dynamic targets (Tires, Porsche, Swarm Asteroids)
+                // Apply Artificial Kinetic Impulse & Reaction to Dynamic targets & Construct objects
                 let targetBody = (e.contact.bi === body) ? e.contact.bj : e.contact.bi;
-                if (targetBody && targetBody.mass > 0) {
-                    const forceMultiplier = 250; // Scaled specifically to negate severe mass differentials natively
-                    const impulse = new CANNON.Vec3(
-                        direction.x * forceMultiplier * targetBody.mass,
-                        direction.y * forceMultiplier * targetBody.mass,
-                        direction.z * forceMultiplier * targetBody.mass
-                    );
-                    targetBody.applyImpulse(impulse, new CANNON.Vec3(0, 0, 0)); // Strike the dead center
-
-                    // Introduce chaotic explosive tumbling geometry
-                    targetBody.angularVelocity.set(
-                        (Math.random() - 0.5) * 10,
-                        (Math.random() - 0.5) * 10,
-                        (Math.random() - 0.5) * 10
-                    );
+                if (targetBody) {
+                    this._applyProjectileHitReaction(targetBody, expPos, direction, visualMode);
                 }
 
                 this.score += scores[fireMode] ?? 10;
-                document.getElementById('score').textContent = this.score;
+                const scoreEl = document.getElementById('score');
+                if (scoreEl) scoreEl.textContent = this.score;
             }
         });
+    }
+
+    /**
+     * Applies physical kinetic impulse, rotational tumble, and visual reaction
+     * to a target body struck by a projectile (Plasma, Rapid, Missile, Grenade).
+     */
+    _applyProjectileHitReaction(targetBody, hitPos, hitDirection, fireMode) {
+        if (!targetBody) return;
+
+        const isConstruct = (targetBody.isConstruct || targetBody.collisionFilterGroup === 2);
+
+        if (isConstruct) {
+            // Wake up and convert to DYNAMIC if currently STATIC or KINEMATIC
+            if (targetBody.type !== CANNON.Body.DYNAMIC) {
+                targetBody.type = CANNON.Body.DYNAMIC;
+                targetBody.mass = targetBody.userDataMass || 100;
+                targetBody.updateMassProperties();
+            }
+            targetBody.isRestingOnGround = false;
+            targetBody.wakeUp();
+
+            // Find associated construct object instance
+            const constructObj = targetBody.constructObj ||
+                (this.constructMode?._constructObjects?.find(o => o.body === targetBody));
+
+            if (constructObj) {
+                constructObj.fired = true;
+                if (!constructObj.firedAt) constructObj.firedAt = performance.now();
+                constructObj.lastHitTime = performance.now();
+                if (!constructObj.timeout) {
+                    constructObj.timeout = setTimeout(() => {
+                        this.constructMode?._despawnObject(constructObj);
+                    }, 120000);
+                }
+
+                // Notify ConstructMode for visual hit flash and shudder recoil
+                if (this.constructMode && typeof this.constructMode.onConstructHit === 'function') {
+                    this.constructMode.onConstructHit(constructObj, fireMode, hitDirection);
+                }
+            }
+
+            // Weapon-specific physical impulse tuning:
+            // Mode 1 (Plasma): High-energy concussive punch + moderate upward lift
+            // Mode 2 (Rapid): Snappy kinetic bullet push + light jitter
+            // Mode 3 (Missile): Massive explosive blast + high launch lift + violent tumble
+            let forceMult = 28;
+            let upwardLift = 6;
+            let spinMagnitude = 6;
+
+            if (fireMode === 1) { // Plasma
+                forceMult = 32;
+                upwardLift = 8;
+                spinMagnitude = 7;
+            } else if (fireMode === 2) { // Rapid
+                forceMult = 6.5;
+                upwardLift = 1.6;
+                spinMagnitude = 2.5;
+            } else if (fireMode === 3 || fireMode === 30) { // Missile
+                forceMult = 90;
+                upwardLift = 32;
+                spinMagnitude = 18;
+            } else if (fireMode === 4) { // Grenade
+                forceMult = 55;
+                upwardLift = 22;
+                spinMagnitude = 12;
+            }
+
+            const bodyMass = targetBody.mass || 100;
+            const impulse = new CANNON.Vec3(
+                hitDirection.x * forceMult * bodyMass,
+                (hitDirection.y * forceMult + upwardLift) * bodyMass,
+                hitDirection.z * forceMult * bodyMass
+            );
+
+            // Compute local contact point relative to target center of mass for realistic torque
+            const localContact = new CANNON.Vec3(
+                hitPos.x - targetBody.position.x,
+                hitPos.y - targetBody.position.y,
+                hitPos.z - targetBody.position.z
+            );
+
+            targetBody.applyImpulse(impulse, localContact);
+
+            // Add chaotic explosive tumbling spin
+            targetBody.angularVelocity.x += (Math.random() - 0.5) * spinMagnitude;
+            targetBody.angularVelocity.y += (Math.random() - 0.5) * spinMagnitude;
+            targetBody.angularVelocity.z += (Math.random() - 0.5) * spinMagnitude;
+
+        } else if (targetBody.mass > 0) {
+            // Standard Dynamic targets (Tires, Porsche, Swarm Asteroids)
+            const forceMultiplier = (fireMode === 3 || fireMode === 30) ? 350 : (fireMode === 2 ? 80 : 250);
+            const impulse = new CANNON.Vec3(
+                hitDirection.x * forceMultiplier * targetBody.mass,
+                hitDirection.y * forceMultiplier * targetBody.mass,
+                hitDirection.z * forceMultiplier * targetBody.mass
+            );
+            targetBody.applyImpulse(impulse, new CANNON.Vec3(0, 0, 0));
+
+            const spin = (fireMode === 3 || fireMode === 30) ? 16 : (fireMode === 2 ? 4 : 10);
+            targetBody.angularVelocity.set(
+                (Math.random() - 0.5) * spin,
+                (Math.random() - 0.5) * spin,
+                (Math.random() - 0.5) * spin
+            );
+        }
     }
 
 
@@ -2120,6 +2229,18 @@ class DioramaScene {
             // Provide collidable meshes for mouse raycasting
             const interactables = [];
             if (this.roomModel) interactables.push(this.roomModel);
+            if (this.constructMode && this.constructMode._constructObjects) {
+                for (const obj of this.constructMode._constructObjects) {
+                    if (obj.mesh && obj.mesh.parent) interactables.push(obj.mesh);
+                }
+            }
+            if (this.physicsWorld && this.physicsWorld.dynamicBodies) {
+                for (const pair of this.physicsWorld.dynamicBodies) {
+                    if (pair.mesh && pair.mesh.parent && pair.mesh !== this.mechaWrapper) {
+                        interactables.push(pair.mesh);
+                    }
+                }
+            }
 
             // Only process input manager updates if the menu is NOT open
             const menuOpen = !document.getElementById('main-menu').classList.contains('hidden');

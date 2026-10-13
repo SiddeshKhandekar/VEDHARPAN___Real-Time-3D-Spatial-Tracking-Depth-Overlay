@@ -234,7 +234,7 @@ export class MechaController {
             isTrigger: false
         });
         this.shieldPhysics.collisionFilterGroup = 4;
-        this.shieldPhysics.collisionFilterMask = 2 | 1; // Block projectiles(2) and environment(1)
+        this.shieldPhysics.collisionFilterMask = 1 | 2 | 8; // Block projectiles(8), constructs(2), and environment(1)
         // We do not add the shield directly to the rigid physics world as a free body, 
         // because it's kinematic and strictly tethered to the front of the mecha.
         // Instead, we will sync its coordinate transform manually when Active.
@@ -637,7 +637,7 @@ export class MechaController {
             // Re-bind to grid
             if (this.shieldPhysics.collisionFilterGroup === 0) {
                 this.shieldPhysics.collisionFilterGroup = 4;
-                this.shieldPhysics.collisionFilterMask = 2 | 1;
+                this.shieldPhysics.collisionFilterMask = 1 | 2 | 8;
             }
         } else {
             // Disable tracking dynamically but DO NOT teleport position (Destroys SAP Broadphase Arrays natively causing severe physics lag)
@@ -694,8 +694,15 @@ export class MechaController {
             return;
         }
 
-        // Scan purely against physically registered dynamic entities
+        // Scan against physically registered dynamic entities and active construct objects
         const dynamicMeshes = this.physicsWorld.dynamicBodies.map(b => b.mesh).filter(m => !!m);
+        if (this.constructMode && this.constructMode._constructObjects) {
+            for (const obj of this.constructMode._constructObjects) {
+                if (obj.mesh && obj.mesh.parent) {
+                    dynamicMeshes.push(obj.mesh);
+                }
+            }
+        }
 
         let currentTarget = null;
         let closestDistSq = Infinity;
@@ -727,8 +734,9 @@ export class MechaController {
             this.lockUiEl.classList.remove('hidden');
 
             if (this.lockTarget === currentTarget) {
-                // Maintained lock!
-                this.lockTimer = Math.min(3.0, this.lockTimer + dt);
+                // Maintained lock! Accelerated when crosshair is centered
+                const lockRate = closestDistSq < 0.01 ? 2.5 : 1.5;
+                this.lockTimer = Math.min(3.0, this.lockTimer + dt * lockRate);
             } else {
                 // New target acquired, reset timer
                 this.lockTarget = currentTarget;
@@ -763,8 +771,8 @@ export class MechaController {
                 this.lockUiEl.style.left = `${x}px`;
                 this.lockUiEl.style.top = `${y}px`;
 
-                // Handle visual bracket animation
-                const progress = this.lockTimer / 3.0; // 0.0 to 1.0
+                // Handle visual bracket animation (snappy 1.5s lock)
+                const progress = Math.min(1.0, this.lockTimer / 1.5); // 0.0 to 1.0
 
                 // Cyan -> Yellow -> Orange -> Red Interpolation
                 let color = new THREE.Color();
