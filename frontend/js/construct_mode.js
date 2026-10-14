@@ -594,164 +594,208 @@ export class ConstructMode {
         console.log('[ConstructMode] Extruding stroke —', this._strokePoints.length, 'pts');
         this._updateHUD();
 
-        const points3D = this._strokePoints;
+        try {
+            const points3D = this._strokePoints;
 
-        // Build local frame from stroke centroid + camera orientation
-        const centroid = new THREE.Vector3();
-        points3D.forEach(p => centroid.add(p));
-        centroid.divideScalar(points3D.length);
+            // Build local frame from stroke centroid + camera orientation
+            const centroid = new THREE.Vector3();
+            points3D.forEach(p => centroid.add(p));
+            centroid.divideScalar(points3D.length);
 
-        const planeRight = new THREE.Vector3(1, 0, 0).applyQuaternion(this.camera.quaternion);
-        const planeUp = new THREE.Vector3(0, 1, 0).applyQuaternion(this.camera.quaternion);
+            const planeRight = new THREE.Vector3(1, 0, 0).applyQuaternion(this.camera.quaternion);
+            const planeUp = new THREE.Vector3(0, 1, 0).applyQuaternion(this.camera.quaternion);
 
-        // Project to 2D
-        const pts2D = points3D.map(p => {
-            const rel = p.clone().sub(centroid);
-            return new THREE.Vector2(rel.dot(planeRight), rel.dot(planeUp));
-        });
+            // Project to 2D
+            const pts2D = points3D.map(p => {
+                const rel = p.clone().sub(centroid);
+                return new THREE.Vector2(rel.dot(planeRight), rel.dot(planeUp));
+            });
 
-        // Simplify
-        const simplified = douglasPeucker(pts2D, DP_EPSILON);
+            // Simplify
+            const simplified = douglasPeucker(pts2D, DP_EPSILON);
 
-        // If the last point is closed or within snap proximity to start, pop duplicate to prevent degenerate segment before shape.closePath()
-        if (simplified.length > 3 && simplified[simplified.length - 1].distanceTo(simplified[0]) < 0.20) {
-            simplified.pop();
-        }
+            // If the last point is closed or within snap proximity to start, pop duplicate to prevent degenerate segment before shape.closePath()
+            if (simplified.length > 3 && simplified[simplified.length - 1].distanceTo(simplified[0]) < 0.20) {
+                simplified.pop();
+            }
 
-        if (simplified.length < 3) {
-            console.warn('[ConstructMode] Simplified stroke too short — resetting');
+            if (simplified.length < 3) {
+                console.warn('[ConstructMode] Simplified stroke too short — resetting');
+                this.state = STATES.DRAWING;
+                this._updateHUD();
+                return;
+            }
+
+            // Build shape
+            const shape = new THREE.Shape();
+            shape.moveTo(simplified[0].x, simplified[0].y);
+            for (let i = 1; i < simplified.length; i++) {
+                shape.lineTo(simplified[i].x, simplified[i].y);
+            }
+            shape.closePath();
+
+            // Extrude depth proportional to bounding box
+            const box = new THREE.Box2();
+            simplified.forEach(p => box.expandByPoint(p));
+            const size = new THREE.Vector2();
+            box.getSize(size);
+            const extrudeDepth = Math.max(0.15, Math.min((size.x + size.y) * 0.25, 1.5));
+
+            const geometry = new THREE.ExtrudeGeometry(shape, {
+                depth: extrudeDepth,
+                bevelEnabled: true,
+                bevelThickness: 0.04,
+                bevelSize: 0.03,
+                bevelSegments: 2,
+            });
+            geometry.computeBoundingBox();
+            geometry.center();
+
+            // Translucent cyan glass material
+            const material = new THREE.MeshPhysicalMaterial({
+                color: 0x00f2fe,
+                emissive: 0x003344,
+                emissiveIntensity: 0.4,
+                transparent: true,
+                opacity: 0.55,
+                roughness: 0.05,
+                metalness: 0.1,
+                transmission: 0.55,
+                thickness: 0.5,
+                depthWrite: false,
+                side: THREE.DoubleSide,
+            });
+
+            const mesh = new THREE.Mesh(geometry, material);
+
+            geometry.computeBoundingBox();
+            const bb = geometry.boundingBox;
+            const hw = Math.max(0.15, (bb.max.x - bb.min.x) / 2);
+            const hh = Math.max(0.15, (bb.max.y - bb.min.y) / 2);
+            const hd = Math.max(0.15, (bb.max.z - bb.min.z) / 2);
+
+            // Calculate realistic mass based on extruded physical volume (density ~ 100 kg/m^3)
+            const volume = (hw * 2) * (hh * 2) * (hd * 2);
+            const mass = Math.max(30, Math.min(1500, volume * 100));
+
+            // Determine if object is "too big" (span > 3m or volume > 2.5m³) vs "small"
+            const spanX = (bb.max.x - bb.min.x);
+            const spanY = (bb.max.y - bb.min.y);
+            const maxSpan = Math.max(spanX, spanY, hd * 2);
+            const isBig = (maxSpan > 3.0 || volume > 2.5);
+            const isLaidFlat = isBig && (spanX >= spanY);
+
+            // Aim direction
+            const shootDir = new THREE.Vector3();
+            const camDir = new THREE.Vector3();
+            this.camera.getWorldDirection(camDir);
+            if (this._input && this._input.raycaster && this._input.raycaster.ray && this._input.raycaster.ray.direction.lengthSq() > 0.01) {
+                shootDir.copy(this._input.raycaster.ray.direction).normalize();
+            } else {
+                shootDir.copy(camDir);
+            }
+            if (shootDir.dot(camDir) < 0.2) {
+                shootDir.copy(camDir);
+            }
+
+            const constructObj = {
+                mesh,
+                body: null,
+                fired: false,
+                createdAt: performance.now(),
+                firedAt: null,
+                lastHitTime: null,
+                timeout: null,
+                hitFlashIntensity: 0,
+                hitFlashColor: null,
+                isBig,
+                isLaidFlat,
+                hw,
+                hh,
+                hd,
+                volume
+            };
+
+            // Compute hover position: in front of mecha if small, beneath mecha if too big
+            const initialPos = this._computeHoverPosition(constructObj, shootDir);
+            mesh.position.copy(initialPos);
+
+            if (isLaidFlat) {
+                const mechaYaw = this.mecha ? this.mecha.rotation.y : (this._getOrbitYaw ? this._getOrbitYaw() : 0);
+                mesh.rotation.set(-Math.PI / 2, mechaYaw, 0, 'YXZ');
+            } else {
+                mesh.quaternion.copy(this.camera.quaternion);
+            }
+            this.scene.add(mesh);
+
+            const body = new CANNON.Body({
+                mass: mass,
+                position: new CANNON.Vec3(mesh.position.x, mesh.position.y, mesh.position.z),
+                quaternion: new CANNON.Quaternion(mesh.quaternion.x, mesh.quaternion.y, mesh.quaternion.z, mesh.quaternion.w)
+            });
+            body.userDataVolume = volume;
+            body.userDataMass = mass;
+            body.isConstruct = true;
+            body.isRestingOnGround = false;
+
+            // 1. Primary Box shape: provides solid flat surfaces for Mecha to stand on and slide over
+            body.addShape(new CANNON.Box(new CANNON.Vec3(hw, hh, hd)));
+
+            // 2. Corner and bottom contact spheres: enables collision against static CANNON.Trimesh environment (floors & stairs)
+            const sphereR = Math.min(0.2, hw * 0.4, hh * 0.4, hd * 0.4);
+            const sphereOffsets = [
+                // Bottom face corners & center
+                new CANNON.Vec3(-hw + sphereR, -hh + sphereR, -hd + sphereR),
+                new CANNON.Vec3( hw - sphereR, -hh + sphereR, -hd + sphereR),
+                new CANNON.Vec3(-hw + sphereR, -hh + sphereR,  hd - sphereR),
+                new CANNON.Vec3( hw - sphereR, -hh + sphereR,  hd - sphereR),
+                new CANNON.Vec3(0, -hh + sphereR, 0),
+                // Top face corners (for upside-down landing or tumbling)
+                new CANNON.Vec3(-hw + sphereR,  hh - sphereR, -hd + sphereR),
+                new CANNON.Vec3( hw - sphereR,  hh - sphereR, -hd + sphereR),
+                new CANNON.Vec3(-hw + sphereR,  hh - sphereR,  hd - sphereR),
+                new CANNON.Vec3( hw - sphereR,  hh - sphereR,  hd - sphereR),
+            ];
+            sphereOffsets.forEach(offset => {
+                body.addShape(new CANNON.Sphere(sphereR), offset);
+            });
+
+            body.linearDamping = 0.35;
+            body.angularDamping = 0.50;
+            body.material = this.physicsWorld.getConstructMaterial();
+
+            // Group 2 — collides with Environment (1), Constructs (2), Mecha (4), and Projectiles (8)
+            body.collisionFilterGroup = 2;
+            body.collisionFilterMask = 1 | 2 | 4 | 8;
+
+            // Frozen in place (KINEMATIC) during AIMING until fired with force meter
+            body.type = CANNON.Body.KINEMATIC;
+            body.velocity.set(0, 0, 0);
+            this.physicsWorld.world.addBody(body);
+
+            body.constructObj = constructObj;
+            mesh.constructObj = constructObj;
+            mesh.name = 'construct_object';
+            constructObj.body = body;
+            this._constructObjects.push(constructObj);
+
+            // Clear the drawn stroke
+            this._clearStrokeLine();
+            this._strokePoints = [];
+            this._isClosed = false;
+
+            // Auto-enter AIMING state
+            this.state = STATES.AIMING;
+            this.pointsRemaining = MAX_POINTS;
+            this._updateHUD();
+            this._showForceMeter();
+            console.log(`[ConstructMode] 3D Object Ready! (${isBig ? 'BIG — Hovering BENEATH mecha' : 'SMALL — Hovering IN FRONT of mecha'}) Mass: ${mass.toFixed(1)}kg, Volume: ${volume.toFixed(2)}m³ — STATE: AIMING`);
+        } catch (err) {
+            console.error('[ConstructMode] Error converting stroke to 3D:', err);
             this.state = STATES.DRAWING;
             this._updateHUD();
-            return;
+            this._extruding = false;
         }
-
-        // Build shape
-        const shape = new THREE.Shape();
-        shape.moveTo(simplified[0].x, simplified[0].y);
-        for (let i = 1; i < simplified.length; i++) {
-            shape.lineTo(simplified[i].x, simplified[i].y);
-        }
-        shape.closePath();
-
-        // Extrude depth proportional to bounding box
-        const box = new THREE.Box2();
-        simplified.forEach(p => box.expandByPoint(p));
-        const size = new THREE.Vector2();
-        box.getSize(size);
-        const extrudeDepth = Math.max(0.15, Math.min((size.x + size.y) * 0.25, 1.5));
-
-        const geometry = new THREE.ExtrudeGeometry(shape, {
-            depth: extrudeDepth,
-            bevelEnabled: true,
-            bevelThickness: 0.04,
-            bevelSize: 0.03,
-            bevelSegments: 2,
-        });
-        geometry.computeBoundingBox();
-        geometry.center();
-
-        // Translucent cyan glass material
-        const material = new THREE.MeshPhysicalMaterial({
-            color: 0x00f2fe,
-            emissive: 0x003344,
-            emissiveIntensity: 0.4,
-            transparent: true,
-            opacity: 0.55,
-            roughness: 0.05,
-            metalness: 0.1,
-            transmission: 0.55,
-            thickness: 0.5,
-            depthWrite: false,
-            side: THREE.DoubleSide,
-        });
-
-        const mesh = new THREE.Mesh(geometry, material);
-        mesh.quaternion.copy(this.camera.quaternion);
-        mesh.position.copy(centroid);
-        this.scene.add(mesh);
-
-        geometry.computeBoundingBox();
-        const bb = geometry.boundingBox;
-        const hw = Math.max(0.15, (bb.max.x - bb.min.x) / 2);
-        const hh = Math.max(0.15, (bb.max.y - bb.min.y) / 2);
-        const hd = Math.max(0.15, (bb.max.z - bb.min.z) / 2);
-
-        // Calculate realistic mass based on extruded physical volume (density ~ 100 kg/m^3)
-        const volume = (hw * 2) * (hh * 2) * (hd * 2);
-        const mass = Math.max(30, Math.min(1500, volume * 100));
-
-        const body = new CANNON.Body({
-            mass: mass,
-            position: new CANNON.Vec3(mesh.position.x, mesh.position.y, mesh.position.z),
-            quaternion: new CANNON.Quaternion(mesh.quaternion.x, mesh.quaternion.y, mesh.quaternion.z, mesh.quaternion.w)
-        });
-        body.userDataVolume = volume;
-        body.userDataMass = mass;
-        body.isConstruct = true;
-        body.isRestingOnGround = false;
-
-        // 1. Primary Box shape: provides solid flat surfaces for Mecha to stand on and slide over
-        body.addShape(new CANNON.Box(new CANNON.Vec3(hw, hh, hd)));
-
-        // 2. Corner and bottom contact spheres: enables collision against static CANNON.Trimesh environment (floors & stairs)
-        const sphereR = Math.min(0.2, hw * 0.4, hh * 0.4, hd * 0.4);
-        const sphereOffsets = [
-            // Bottom face corners & center
-            new CANNON.Vec3(-hw + sphereR, -hh + sphereR, -hd + sphereR),
-            new CANNON.Vec3( hw - sphereR, -hh + sphereR, -hd + sphereR),
-            new CANNON.Vec3(-hw + sphereR, -hh + sphereR,  hd - sphereR),
-            new CANNON.Vec3( hw - sphereR, -hh + sphereR,  hd - sphereR),
-            new CANNON.Vec3(0, -hh + sphereR, 0),
-            // Top face corners (for upside-down landing or tumbling)
-            new CANNON.Vec3(-hw + sphereR,  hh - sphereR, -hd + sphereR),
-            new CANNON.Vec3( hw - sphereR,  hh - sphereR, -hd + sphereR),
-            new CANNON.Vec3(-hw + sphereR,  hh - sphereR,  hd - sphereR),
-            new CANNON.Vec3( hw - sphereR,  hh - sphereR,  hd - sphereR),
-        ];
-        sphereOffsets.forEach(offset => {
-            body.addShape(new CANNON.Sphere(sphereR), offset);
-        });
-
-        body.linearDamping = 0.35;
-        body.angularDamping = 0.50;
-        body.material = this.physicsWorld.getConstructMaterial();
-
-        // Group 2 — collides with Environment (1), Constructs (2), Mecha (4), and Projectiles (8)
-        body.collisionFilterGroup = 2;
-        body.collisionFilterMask = 1 | 2 | 4 | 8;
-
-        // Frozen in place (KINEMATIC) during AIMING until fired with force meter
-        body.type = CANNON.Body.KINEMATIC;
-        body.velocity.set(0, 0, 0);
-        this.physicsWorld.world.addBody(body);
-
-        const constructObj = {
-            mesh,
-            body,
-            fired: false,
-            createdAt: performance.now(),
-            firedAt: null,
-            lastHitTime: null,
-            timeout: null,
-            hitFlashIntensity: 0,
-            hitFlashColor: null
-        };
-        body.constructObj = constructObj;
-        mesh.constructObj = constructObj;
-        mesh.name = 'construct_object';
-        this._constructObjects.push(constructObj);
-
-        // Clear the drawn stroke
-        this._clearStrokeLine();
-        this._strokePoints = [];
-        this._isClosed = false;
-
-        // Auto-enter AIMING state
-        this.state = STATES.AIMING;
-        this.pointsRemaining = MAX_POINTS;
-        this._updateHUD();
-        this._showForceMeter();
-        console.log(`[ConstructMode] 3D Object Ready! Mass: ${mass.toFixed(1)}kg, Volume: ${volume.toFixed(2)}m³ — STATE: AIMING`);
     }
 
     // ─── Force-Meter Fire ─────────────────────────────────────────────────────
@@ -789,8 +833,8 @@ export class ConstructMode {
         const liftFactor = (volume <= 2.5) ? Math.min(0.96, (speed / 105.0) * 0.96 * (1.0 - Math.abs(shootDir.y))) : 0;
         obj.body.liftFactor = liftFactor;
 
-        // Reposition cleanly right along aim vector without parallax offset
-        const startPos = this.camera.position.clone().addScaledVector(shootDir, 3.2);
+        // Reposition cleanly to hover position (in front if small, beneath if big)
+        const startPos = this._computeHoverPosition(obj, shootDir);
         obj.mesh.position.copy(startPos);
         obj.body.position.copy(startPos);
 
@@ -798,6 +842,15 @@ export class ConstructMode {
         obj.body.mass = obj.body.userDataMass || 100;
         obj.body.updateMassProperties();
         obj.body.wakeUp();
+
+        // Safe launch: temporarily exclude Mecha (Group 4) collision for 300ms during initial launch
+        // so the launched construct never pushes or kicks the mecha down upon firing
+        obj.body.collisionFilterMask = 1 | 2 | 8;
+        setTimeout(() => {
+            if (obj && obj.body) {
+                obj.body.collisionFilterMask = 1 | 2 | 4 | 8;
+            }
+        }, 300);
 
         // In-flight minimal damping: preserves momentum and speed over long distance flight
         obj.body.linearDamping = 0.008;
@@ -879,6 +932,63 @@ export class ConstructMode {
         }
     }
 
+    /**
+     * Computes the hover target position for a pending construct object:
+     * - Small objects hover in front of the mecha along the aim line.
+     * - Too big objects hover beneath the mecha (like a floating platform under its feet).
+     * @param {Object} obj — construct object record with { hw, hh, hd, isBig, isLaidFlat }
+     * @param {THREE.Vector3} shootDir — normalized aim direction
+     * @returns {THREE.Vector3}
+     */
+    _computeHoverPosition(obj, shootDir) {
+        const hw = obj.hw || 0.5;
+        const hh = obj.hh || 0.5;
+        const hd = obj.hd || 0.5;
+        const isBig = !!obj.isBig;
+
+        const camDir = new THREE.Vector3();
+        this.camera.getWorldDirection(camDir);
+        const aimDir = (shootDir && shootDir.lengthSq() > 0.01) ? shootDir : camDir;
+
+        // Check if Mecha reference exists
+        const mechaPos = (this.mecha && this.mecha.position) ?
+            this.mecha.position.clone() :
+            (this.mechaController?.body?.position ?
+                new THREE.Vector3(this.mechaController.body.position.x, this.mechaController.body.position.y, this.mechaController.body.position.z) :
+                null);
+
+        if (!mechaPos) {
+            // Fallback if no mecha in scene (e.g. Free Roam without mecha)
+            const fallbackDist = isBig ? 4.5 : 3.2;
+            return this.camera.position.clone().addScaledVector(aimDir, fallbackDist);
+        }
+
+        if (isBig) {
+            // ─── TOO BIG OBJECT: HOVER BENEATH MECHA ─────────────────────────────
+            // Positioned under the mecha's feet so it never knocks the mecha down.
+            // Horizontal position: directly under mecha, with slight forward bias in aim direction
+            const forwardBias = Math.min(1.5, Math.max(0.4, hw * 0.2));
+            const targetX = mechaPos.x + aimDir.x * forwardBias;
+            const targetZ = mechaPos.z + aimDir.z * forwardBias;
+
+            // Vertical: top of the construct is positioned safely below the mecha's feet (feet at mechaPos.y)
+            const effectiveHalfHeight = obj.isLaidFlat ? hd : hh;
+            const targetY = mechaPos.y - effectiveHalfHeight - 0.25;
+
+            return new THREE.Vector3(targetX, targetY, targetZ);
+        } else {
+            // ─── SMALL OBJECT: HOVER IN FRONT OF MECHA ───────────────────────────
+            // Centered at chest height (~2.2m above feet) and extended forward along aim vector
+            const chestPos = new THREE.Vector3(mechaPos.x, mechaPos.y + 2.2, mechaPos.z);
+
+            // Forward distance clears mecha front body radius (~0.8m) plus half-extent of object
+            const maxHalfExtent = Math.max(hw, hh, hd);
+            const forwardDist = Math.max(2.8, 1.2 + maxHalfExtent + 0.6);
+
+            return chestPos.addScaledVector(aimDir, forwardDist);
+        }
+    }
+
     _syncObjectToAim() {
         const obj = this._constructObjects.find(o => !o.fired);
         if (!obj) return;
@@ -895,13 +1005,20 @@ export class ConstructMode {
             shootDir.copy(camDir);
         }
 
-        // Hold object floating 3.2m in front of camera along aim vector
-        const targetPos = this.camera.position.clone().addScaledVector(shootDir, 3.2);
+        // Hover target: in front of mecha if small, beneath mecha if too big
+        const targetPos = this._computeHoverPosition(obj, shootDir);
         obj.mesh.position.lerp(targetPos, 0.25);
         obj.body.position.copy(obj.mesh.position);
+
         if (!obj.customRotation) {
-            obj.mesh.quaternion.copy(this.camera.quaternion);
-            obj.body.quaternion.copy(obj.mesh.quaternion);
+            if (obj.isBig && obj.isLaidFlat) {
+                const mechaYaw = this.mecha ? this.mecha.rotation.y : (this._getOrbitYaw ? this._getOrbitYaw() : 0);
+                obj.mesh.rotation.set(-Math.PI / 2, mechaYaw, 0, 'YXZ');
+                obj.body.quaternion.copy(obj.mesh.quaternion);
+            } else {
+                obj.mesh.quaternion.copy(this.camera.quaternion);
+                obj.body.quaternion.copy(obj.mesh.quaternion);
+            }
         }
     }
 
