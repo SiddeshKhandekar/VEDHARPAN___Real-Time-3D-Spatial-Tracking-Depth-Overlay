@@ -92,6 +92,12 @@ export class ConstructMode {
         // Drawing
         this._strokePoints = [];
         this.pointsRemaining = MAX_POINTS;
+        this._isClosed = false;
+        this._snapPulseStart = null;
+        this._snapIndicator = null;
+        this._snapRingMesh = null;
+        this._snapDotMesh = null;
+        this._snapGuideMesh = null;
 
         // Fist debounce — timestamp when fist gesture first detected
         this._fistStart = null;
@@ -195,9 +201,12 @@ export class ConstructMode {
         this.state = STATES.IDLE;
         this.pointsRemaining = MAX_POINTS;
         this._strokePoints = [];
+        this._isClosed = false;
+        this._snapPulseStart = null;
         this._fistStart = null;
         this._chargeStart = null;
         this._charge = 0;
+        this._clearStrokeLine();
         this._updateHUD();
         console.log('[ConstructMode] Activated');
     }
@@ -205,6 +214,8 @@ export class ConstructMode {
     deactivate() {
         this.active = false;
         this._clearStrokeLine();
+        this._isClosed = false;
+        this._snapPulseStart = null;
         this._hideForceMeter();
 
         // If an object was created and is pending in AIMING mode, release it into dynamic physics
@@ -313,6 +324,51 @@ export class ConstructMode {
 
         // Arrow-key rotation applies rotation to pending or fired construct object
         this._applyArrowRotation();
+
+        // Animate snap indicator reticle (start point snap target)
+        if (this._snapIndicator && this._snapIndicator.visible) {
+            this._snapIndicator.quaternion.copy(this.camera.quaternion);
+            const now = performance.now();
+
+            if (this._isClosed) {
+                // Closed state: vivid glowing emerald/cyan lock
+                this._snapRingMesh.material.color.setHex(0x00ffcc);
+                this._snapDotMesh.material.color.setHex(0x00ffcc);
+                this._snapGuideMesh.material.color.setHex(0x00ffaa);
+                this._snapGuideMesh.material.opacity = 0.75;
+
+                const pulse = 1.0 + 0.08 * Math.sin(now * 0.008);
+                this._snapIndicator.scale.set(pulse, pulse, pulse);
+                this._snapGuideMesh.rotation.z += dt * 1.5;
+            } else if (this._strokePoints.length >= 3 && this._checkCanCloseShape()) {
+                // Ready to close: beckoning pulse to guide user back to start point
+                this._snapRingMesh.material.color.setHex(0x00f2fe);
+                this._snapDotMesh.material.color.setHex(0x00ffff);
+                this._snapGuideMesh.material.color.setHex(0x00a8ff);
+
+                const pulse = 1.0 + 0.16 * Math.sin(now * 0.01);
+                this._snapIndicator.scale.set(pulse, pulse, pulse);
+                this._snapGuideMesh.material.opacity = 0.35 + 0.25 * Math.sin(now * 0.01);
+                this._snapGuideMesh.rotation.z += dt * 0.8;
+            } else {
+                // Starting phase: calm subtle marker
+                this._snapRingMesh.material.color.setHex(0x00f2fe);
+                this._snapDotMesh.material.color.setHex(0x00ffff);
+                this._snapGuideMesh.material.opacity = 0.25;
+                this._snapIndicator.scale.set(1.0, 1.0, 1.0);
+            }
+
+            // Snap burst pulse decay
+            if (this._snapPulseStart !== null) {
+                const elapsed = (now - this._snapPulseStart) / 1000.0;
+                if (elapsed < 0.4) {
+                    const burst = 1.0 + Math.sin((elapsed / 0.4) * Math.PI) * 0.6;
+                    this._snapIndicator.scale.multiplyScalar(burst);
+                } else {
+                    this._snapPulseStart = null;
+                }
+            }
+        }
     }
 
     // ─── Right Hand: Drawing ──────────────────────────────────────────────────
@@ -351,6 +407,69 @@ export class ConstructMode {
         }
         const worldPoint = this.camera.position.clone().addScaledVector(dir, drawDist);
 
+        // First point: initialize start point and snap indicator
+        if (this._strokePoints.length === 0) {
+            this._strokePoints.push(worldPoint);
+            this.pointsRemaining = Math.max(0, this.pointsRemaining - 1);
+            this._updateStrokeLine();
+            this._updateSnapIndicator();
+            this._updateHUD();
+            return;
+        }
+
+        const p0 = this._strokePoints[0];
+        const p0NDC = p0.clone().project(this.camera);
+        const screenDistToP0 = Math.hypot(indexTip.x - p0NDC.x, indexTip.y - p0NDC.y);
+        const worldDistToP0 = worldPoint.distanceTo(p0);
+
+        const canClose = this._checkCanCloseShape(worldPoint);
+
+        // Snap thresholds: within ~55cm in world space OR within ~9% screen space (NDC 0.18)
+        const SNAP_WORLD_DIST = 0.55;
+        const SNAP_SCREEN_DIST = 0.18;
+        const isNearFirstPoint = (worldDistToP0 < SNAP_WORLD_DIST || screenDistToP0 < SNAP_SCREEN_DIST);
+
+        if (canClose && isNearFirstPoint) {
+            // Automatic connection to the first point!
+            if (!this._isClosed) {
+                this._isClosed = true;
+                // Snap ending point to exact first point position to create a perfectly closed shape
+                this._strokePoints.push(p0.clone());
+                this.pointsRemaining = Math.max(0, this.pointsRemaining - 1);
+                this._updateStrokeLine();
+                this._triggerSnapPulse();
+                this._updateSnapIndicator();
+                this._updateHUD();
+                console.log('[ConstructMode] Shape Closed! Automatically connected ending point to first point.');
+            } else {
+                // Keep the final snapped point locked to first point to prevent hand jitter
+                this._strokePoints[this._strokePoints.length - 1].copy(p0);
+                this._updateStrokeLine();
+            }
+            return;
+        }
+
+        // If currently snapped/closed, check if user intentionally pulled hand away to continue drawing
+        if (this._isClosed) {
+            const UNLOCK_WORLD_DIST = SNAP_WORLD_DIST * 1.4;
+            const UNLOCK_SCREEN_DIST = SNAP_SCREEN_DIST * 1.4;
+            if (worldDistToP0 > UNLOCK_WORLD_DIST && screenDistToP0 > UNLOCK_SCREEN_DIST) {
+                // User pulled away: unsnap so they can continue drawing additional vertices
+                this._isClosed = false;
+                if (this._strokePoints.length > 1 && this._strokePoints.at(-1).distanceTo(p0) < 0.001) {
+                    this._strokePoints.pop();
+                    this.pointsRemaining = Math.min(MAX_POINTS, this.pointsRemaining + 1);
+                }
+                this._updateStrokeLine();
+                this._updateSnapIndicator();
+                this._updateHUD();
+                console.log('[ConstructMode] Unsnapped: continuing stroke drawing.');
+            } else {
+                // Still in snap zone, keep locked
+                return;
+            }
+        }
+
         // ── Min-distance filter: skip if too close to last point ──────────────
         const last = this._strokePoints.at(-1);
         if (last && worldPoint.distanceTo(last) < MIN_STROKE_DIST) return;
@@ -358,7 +477,73 @@ export class ConstructMode {
         this._strokePoints.push(worldPoint);
         this.pointsRemaining = Math.max(0, this.pointsRemaining - 1);
         this._updateStrokeLine();
+        this._updateSnapIndicator();
         this._updateHUD();
+    }
+
+    /**
+     * Checks if the drawn stroke forms a valid object shape (minimum a triangle shape
+     * overall, i.e. at least 3 endpoints/vertices) so it can automatically connect
+     * with the first point.
+     * @param {THREE.Vector3|null} currentPoint
+     * @returns {boolean}
+     */
+    _checkCanCloseShape(currentPoint = null) {
+        if (this._strokePoints.length < 3) return false;
+
+        const p0 = this._strokePoints[0];
+
+        // 1. Minimum cumulative path length traveled (must have drawn a substantial path, >= 0.5m)
+        let totalPathLength = 0;
+        for (let i = 1; i < this._strokePoints.length; i++) {
+            totalPathLength += this._strokePoints[i].distanceTo(this._strokePoints[i - 1]);
+        }
+        if (currentPoint) {
+            totalPathLength += currentPoint.distanceTo(this._strokePoints.at(-1));
+        }
+        if (totalPathLength < 0.5) return false;
+
+        // 2. Minimum maximum distance reached from start point (must have moved away from start, >= 0.35m)
+        let maxDistFromStart = 0;
+        for (const p of this._strokePoints) {
+            const d = p.distanceTo(p0);
+            if (d > maxDistFromStart) maxDistFromStart = d;
+        }
+        if (maxDistFromStart < 0.35) return false;
+
+        // 3. Project stroke points to camera view-plane to evaluate 2D vertices/endpoints
+        const planeRight = new THREE.Vector3(1, 0, 0).applyQuaternion(this.camera.quaternion);
+        const planeUp = new THREE.Vector3(0, 1, 0).applyQuaternion(this.camera.quaternion);
+
+        const pts2D = this._strokePoints.map(p => {
+            const rel = p.clone().sub(p0);
+            return new THREE.Vector2(rel.dot(planeRight), rel.dot(planeUp));
+        });
+        if (currentPoint) {
+            const relCur = currentPoint.clone().sub(p0);
+            pts2D.push(new THREE.Vector2(relCur.dot(planeRight), relCur.dot(planeUp)));
+        }
+
+        // Simplify path with corner epsilon (~0.06m) to identify true structural endpoints/vertices
+        const simplified = douglasPeucker(pts2D, 0.06);
+
+        // A triangle requires at least 3 endpoints (start, corner1, and corner2/current_end)
+        if (simplified.length < 3) return false;
+
+        // 4. Check enclosed 2D polygon area when closed back to start (p0)
+        // Eliminates flat back-and-forth lines where area is near zero
+        let area2D = 0;
+        const n = simplified.length;
+        for (let i = 0; i < n; i++) {
+            const j = (i + 1) % n;
+            area2D += simplified[i].x * simplified[j].y - simplified[j].x * simplified[i].y;
+        }
+        area2D = Math.abs(area2D) * 0.5;
+
+        // Must enclose a real 2D shape (minimum area 0.03 m²)
+        if (area2D < 0.03) return false;
+
+        return true;
     }
 
     // ─── Left Hand: Fist → Extrude ────────────────────────────────────────────
@@ -379,6 +564,15 @@ export class ConstructMode {
 
             if (held >= FIST_HOLD_MS && canExtrude) {
                 this._extruding = true;
+                // If ending point is close to start point and shape qualifies, ensure it is connected before extruding
+                if (!this._isClosed && this._checkCanCloseShape()) {
+                    const p0 = this._strokePoints[0];
+                    const pEnd = this._strokePoints.at(-1);
+                    if (pEnd && pEnd.distanceTo(p0) < 0.75) {
+                        this._strokePoints.push(p0.clone());
+                        this._isClosed = true;
+                    }
+                }
                 this._convertStrokeTo3D();  // Immediately spawns dynamic physics object!
                 this._fistStart = null;
                 setTimeout(() => { this._extruding = false; }, 800); // 800ms gesture debounce
@@ -407,11 +601,8 @@ export class ConstructMode {
         points3D.forEach(p => centroid.add(p));
         centroid.divideScalar(points3D.length);
 
-        const camForward = new THREE.Vector3();
-        this.camera.getWorldDirection(camForward);
-        const planeNormal = camForward.clone().negate();
-        const planeRight = new THREE.Vector3(1, 0, 0);
-        const planeUp = new THREE.Vector3().crossVectors(planeNormal, planeRight).normalize();
+        const planeRight = new THREE.Vector3(1, 0, 0).applyQuaternion(this.camera.quaternion);
+        const planeUp = new THREE.Vector3(0, 1, 0).applyQuaternion(this.camera.quaternion);
 
         // Project to 2D
         const pts2D = points3D.map(p => {
@@ -421,6 +612,12 @@ export class ConstructMode {
 
         // Simplify
         const simplified = douglasPeucker(pts2D, DP_EPSILON);
+
+        // If the last point is closed or within snap proximity to start, pop duplicate to prevent degenerate segment before shape.closePath()
+        if (simplified.length > 3 && simplified[simplified.length - 1].distanceTo(simplified[0]) < 0.20) {
+            simplified.pop();
+        }
+
         if (simplified.length < 3) {
             console.warn('[ConstructMode] Simplified stroke too short — resetting');
             this.state = STATES.DRAWING;
@@ -547,6 +744,7 @@ export class ConstructMode {
         // Clear the drawn stroke
         this._clearStrokeLine();
         this._strokePoints = [];
+        this._isClosed = false;
 
         // Auto-enter AIMING state
         this.state = STATES.AIMING;
@@ -969,6 +1167,63 @@ export class ConstructMode {
         this._strokePointsMesh.renderOrder = 9999;
         this._strokePointsMesh.visible = false;
         this.scene.add(this._strokePointsMesh);
+
+        // Glowing snap reticle / indicator at the first point (start point)
+        this._snapIndicator = new THREE.Group();
+        this._snapIndicator.visible = false;
+        this._snapIndicator.renderOrder = 10000;
+
+        const ringGeo = new THREE.RingGeometry(0.10, 0.14, 32);
+        const ringMat = new THREE.MeshBasicMaterial({
+            color: 0x00f2fe,
+            transparent: true,
+            opacity: 0.85,
+            side: THREE.DoubleSide,
+            depthTest: false,
+            depthWrite: false,
+        });
+        this._snapRingMesh = new THREE.Mesh(ringGeo, ringMat);
+        this._snapIndicator.add(this._snapRingMesh);
+
+        const dotGeo = new THREE.CircleGeometry(0.04, 16);
+        const dotMat = new THREE.MeshBasicMaterial({
+            color: 0x00ffff,
+            transparent: true,
+            opacity: 0.95,
+            side: THREE.DoubleSide,
+            depthTest: false,
+            depthWrite: false,
+        });
+        this._snapDotMesh = new THREE.Mesh(dotGeo, dotMat);
+        this._snapIndicator.add(this._snapDotMesh);
+
+        const guideGeo = new THREE.RingGeometry(0.18, 0.20, 32);
+        const guideMat = new THREE.MeshBasicMaterial({
+            color: 0x00a8ff,
+            transparent: true,
+            opacity: 0.35,
+            side: THREE.DoubleSide,
+            depthTest: false,
+            depthWrite: false,
+        });
+        this._snapGuideMesh = new THREE.Mesh(guideGeo, guideMat);
+        this._snapIndicator.add(this._snapGuideMesh);
+
+        this.scene.add(this._snapIndicator);
+    }
+
+    _updateSnapIndicator() {
+        if (!this._snapIndicator) return;
+        if (this._strokePoints.length > 0) {
+            this._snapIndicator.position.copy(this._strokePoints[0]);
+            this._snapIndicator.visible = true;
+        } else {
+            this._snapIndicator.visible = false;
+        }
+    }
+
+    _triggerSnapPulse() {
+        this._snapPulseStart = performance.now();
     }
 
     _updateStrokeLine() {
@@ -990,6 +1245,11 @@ export class ConstructMode {
 
         if (pts.length >= 2) {
             this._strokeLine.visible = true;
+            if (this._isClosed) {
+                this._strokeLine.material.color.setHex(0x00ffcc);
+            } else {
+                this._strokeLine.material.color.setHex(0x00f2fe);
+            }
         } else {
             this._strokeLine.visible = false;
         }
@@ -998,8 +1258,14 @@ export class ConstructMode {
 
     _clearStrokeLine() {
         this._strokeGeo?.setDrawRange(0, 0);
-        if (this._strokeLine) this._strokeLine.visible = false;
+        if (this._strokeLine) {
+            this._strokeLine.visible = false;
+            this._strokeLine.material.color.setHex(0x00f2fe);
+        }
         if (this._strokePointsMesh) this._strokePointsMesh.visible = false;
+        if (this._snapIndicator) this._snapIndicator.visible = false;
+        this._isClosed = false;
+        this._snapPulseStart = null;
     }
 
     // ─── Force Meter HUD ──────────────────────────────────────────────────────
@@ -1277,18 +1543,29 @@ export class ConstructMode {
 
     _updateHUD() {
         if (!this._hudPoints) return;
-        const labels = {
-            [STATES.IDLE]: '✋ IDLE — Point right index to draw in 3D',
-            [STATES.DRAWING]: '✏️ DRAWING — Hold left fist 0.4s to commit 3D physics object',
-            [STATES.OBJECT_READY]: '🟦 PREPARING 3D OBJECT...',
-            [STATES.AIMING]: '🎯 AIMING — Hold LMB to charge throw force, release to launch!',
-            [STATES.FIRED]: '🚀 3D OBJECT LAUNCHED',
-            [STATES.COOLDOWN]: '⏳ COOLDOWN — Recharging',
-        };
-        const label = labels[this.state] || this.state;
+        let label = '';
+        if (this.state === STATES.DRAWING) {
+            if (this._isClosed) {
+                label = '✨ SHAPE CLOSED — Connected to first point! Hold left fist 0.4s to commit 3D physics object';
+            } else if (this._strokePoints.length >= 3 && this._checkCanCloseShape()) {
+                label = '✏️ DRAWING — Bring ending point near start point to close shape, or hold left fist 0.4s to commit';
+            } else {
+                label = '✏️ DRAWING — Hold left fist 0.4s to commit 3D physics object';
+            }
+        } else {
+            const labels = {
+                [STATES.IDLE]: '✋ IDLE — Point right index to draw in 3D',
+                [STATES.OBJECT_READY]: '🟦 PREPARING 3D OBJECT...',
+                [STATES.AIMING]: '🎯 AIMING — Hold LMB to charge throw force, release to launch!',
+                [STATES.FIRED]: '🚀 3D OBJECT LAUNCHED',
+                [STATES.COOLDOWN]: '⏳ COOLDOWN — Recharging',
+            };
+            label = labels[this.state] || this.state;
+        }
+        const pointColor = this._isClosed ? '#00ffcc' : '#00f2fe';
         // Re-inject innerHTML but preserve the timer span if it exists inside the div
         this._hudPoints.innerHTML =
-            `<span style="font-size:0.75rem;opacity:0.75">${label}</span>` +
+            `<span style="font-size:0.75rem;opacity:0.85;color:${pointColor}">${label}</span>` +
             `<br>POINTS: ${this.pointsRemaining}/${MAX_POINTS}` +
             `<span id="construct-cooldown-timer" style="display:none;margin-left:8px;color:#ffb300;"></span>`;
         // Re-grab the timer span reference since innerHTML was replaced
